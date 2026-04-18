@@ -1,0 +1,11 @@
+{
+    "python.defaultInterpreterPath": "/home/llandre/.venvs/open-webui_retriva-adapter/bin/python",
+    "python.venvPath": "/home/llandre/.venvs",
+    "python.terminal.activateEnvironment": true,
+    "terminal.integrated.env.linux": {
+        "VIRTUAL_ENV": "/home/llandre/.venvs/",
+        "PATH": "/home/llandre/.venvs/open-webui_retriva-adapter/bin:${env:PATH}",
+        "PYTHONPATH": "${workspaceFolder}/src"
+    },
+    "python.terminal.useEnvFile": true
+}
