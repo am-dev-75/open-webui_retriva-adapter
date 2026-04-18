@@ -1,0 +1,1 @@
+# /architect — Thin Adapter

@@ -1,0 +1,1 @@
+# /define — Thin Adapter
