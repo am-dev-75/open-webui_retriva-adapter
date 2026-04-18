@@ -1,0 +1,39 @@
+services:
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:latest
+    ports:
+      - "3000:8080"
+    environment:
+      WEBUI_AUTH: "false"
+    volumes:
+      - owui-data:/app/backend/data
+
+  retriva:
+    image: retriva:latest
+    ports:
+      - "8400:8400"
+
+  adapter:
+    build:
+      context: ./adapter
+      dockerfile: Dockerfile
+    depends_on:
+      - openwebui
+      - retriva
+    environment:
+      OWUI_BASE_URL: http://openwebui:8080
+      OWUI_API_KEY: ${OWUI_API_KEY}
+      RETRIVA_BASE_URL: http://retriva:8400
+      RETRIVA_API_KEY: ${RETRIVA_API_KEY:-}
+      POLL_INTERVAL_SECONDS: "30"
+      DB_PATH: /data/adapter.db
+      LOG_LEVEL: INFO
+    volumes:
+      - adapter-data:/data
+    ports:
+      - "8500:8500"
+    restart: unless-stopped
+
+volumes:
+  owui-data:
+  adapter-data:
