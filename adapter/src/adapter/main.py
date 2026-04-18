@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-import structlog
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
@@ -16,14 +16,14 @@ from prometheus_client import generate_latest
 
 from adapter.config import VERSION, Settings, load_settings
 from adapter.fetcher import FileFetcher
-from adapter.logging_config import setup_logging
+from adapter.logger import setup_logging, get_logger
 from adapter.mapping_store import MappingStore
 from adapter.models import SyncResult
 from adapter.observer import FileObserver
 from adapter.orchestrator import SyncOrchestrator
 from adapter.retriva_client import RetrivaClient
 
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Application state (populated during lifespan)
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN201, ARG001
     global _settings, _store, _orchestrator, _scheduler, _http_client  # noqa: PLW0603
 
     _settings = load_settings()
-    setup_logging(_settings.LOG_LEVEL)
+    setup_logging()
     logger.info(f"### Open Web UI Retriva adapter starting ... ({VERSION})")
 
     # HTTP client shared across components
@@ -74,10 +74,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN201, ARG001
         max_instances=1,
     )
     _scheduler.start()
-    logger.info(
-        "scheduler_started",
-        interval_s=_settings.POLL_INTERVAL_SECONDS,
-    )
+    logger.info(f"scheduler_started interval_s={_settings.POLL_INTERVAL_SECONDS}")
 
     yield
 
@@ -118,7 +115,7 @@ async def readyz() -> dict[str, Any]:
     try:
         if _http_client and _settings:
             resp = await _http_client.get(
-                f"{_settings.OWUI_BASE_URL.rstrip('/')}/api/v1/files",
+                f"{_settings.OWUI_BASE_URL.rstrip('/')}/api/v1/files/",
                 headers={"Authorization": f"Bearer {_settings.OWUI_API_KEY}"},
             )
             checks["owui"] = resp.status_code == 200  # noqa: PLR2004

@@ -8,11 +8,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
-import structlog
+
 
 from adapter.models import MappingRecord
 
-logger = structlog.get_logger(__name__)
+from adapter.logger import get_logger
+
+logger = get_logger(__name__)
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS file_mappings (
@@ -49,7 +51,7 @@ class MappingStore:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.executescript(_SCHEMA)
         await self._db.commit()
-        logger.info("mapping_store_opened", db_path=str(self._db_path))
+        logger.info(f"mapping_store_opened db_path={self._db_path}")
 
     async def close(self) -> None:
         """Close the database connection."""
@@ -90,12 +92,7 @@ class MappingStore:
             await self._conn.commit()
             row_id = cursor.lastrowid
 
-        logger.info(
-            "mapping_created",
-            owui_file_id=owui_file_id,
-            retriva_doc_id=retriva_doc_id,
-            status=status,
-        )
+        logger.info(f"mapping_created owui_file_id={owui_file_id} retriva_doc_id={retriva_doc_id} status={status}")
         return MappingRecord(
             id=row_id,
             owui_file_id=owui_file_id,
@@ -155,11 +152,7 @@ class MappingStore:
                 (status, now, owui_file_id),
             )
             await self._conn.commit()
-        logger.info(
-            "mapping_status_updated",
-            owui_file_id=owui_file_id,
-            status=status,
-        )
+        logger.info(f"mapping_status_updated owui_file_id={owui_file_id} status={status}")
 
     # -- delete --------------------------------------------------------------
 
@@ -172,7 +165,7 @@ class MappingStore:
             await self._conn.commit()
             count = cursor.rowcount
         if count:
-            logger.info("mappings_pruned", count=count)
+            logger.info(f"mappings_pruned count={count}")
         return count
 
     # -- helpers -------------------------------------------------------------

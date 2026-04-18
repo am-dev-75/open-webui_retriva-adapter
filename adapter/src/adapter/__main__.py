@@ -12,7 +12,7 @@ def main() -> None:
         "adapter.main:app",
         host="0.0.0.0",  # noqa: S104
         port=settings.ADAPTER_PORT,
-        log_level="warning",  # structlog handles app logging
+        log_level="warning",
     )
 
 

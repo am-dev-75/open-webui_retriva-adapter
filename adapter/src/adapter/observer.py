@@ -6,12 +6,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import httpx
-import structlog
+
 
 from adapter.config import Settings
 from adapter.models import OWUIFile
 
-logger = structlog.get_logger(__name__)
+from adapter.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,16 +34,21 @@ class FileObserver:
 
     async def list_files(self) -> list[OWUIFile]:
         """Fetch the current file list from Open WebUI."""
-        url = f"{self._base_url}/api/v1/files"
+        url = f"{self._base_url}/api/v1/files/"
         headers = {"Authorization": f"Bearer {self._api_key}"}
 
         response = await self._client.get(url, headers=headers)
         response.raise_for_status()
 
         raw_files = response.json()
-        # OWUI returns a list of file objects
-        if isinstance(raw_files, dict) and "data" in raw_files:
-            raw_files = raw_files["data"]
+        # OWUI returns a list of file objects or a paginated dict
+        if isinstance(raw_files, dict):
+            if "data" in raw_files:
+                raw_files = raw_files["data"]
+            elif "items" in raw_files:
+                raw_files = raw_files["items"]
+            else:
+                raw_files = []
 
         files: list[OWUIFile] = []
         for f in raw_files:
@@ -57,7 +64,7 @@ class FileObserver:
                 ),
             )
 
-        logger.debug("owui_files_listed", count=len(files))
+        logger.debug(f"owui_files_listed count={len(files)}")
         return files
 
     def detect_changes(
@@ -78,9 +85,5 @@ class FileObserver:
         to_ingest = [owui_lookup[fid] for fid in to_ingest_ids]
         to_delete = list(to_delete_ids)
 
-        logger.info(
-            "changes_detected",
-            new_files=len(to_ingest),
-            removed_files=len(to_delete),
-        )
+        logger.info(f"changes_detected new_files={len(to_ingest)} removed_files={len(to_delete)}")
         return FileChanges(to_ingest=to_ingest, to_delete=to_delete)

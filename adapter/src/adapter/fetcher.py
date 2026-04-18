@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import httpx
-import structlog
+
 
 from adapter.config import Settings
 from adapter.models import FetchedFile, OWUIFile
 
-logger = structlog.get_logger(__name__)
+from adapter.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class FileFetcher:
@@ -32,20 +34,11 @@ class FileFetcher:
         try:
             response = await self._client.get(url, headers=headers)
         except httpx.HTTPError as exc:
-            logger.error(
-                "file_download_error",
-                file_id=file_info.id,
-                filename=file_info.filename,
-                error=str(exc),
-            )
+            logger.error(f"file_download_error file_id={file_info.id} filename={file_info.filename} error={exc}")
             raise
 
         if response.status_code == 404:
-            logger.info(
-                "file_not_found",
-                file_id=file_info.id,
-                filename=file_info.filename,
-            )
+            logger.info(f"file_not_found file_id={file_info.id} filename={file_info.filename}")
             return None
 
         response.raise_for_status()
@@ -58,10 +51,5 @@ class FileFetcher:
             content=content,
             size=len(content),
         )
-        logger.info(
-            "file_downloaded",
-            file_id=file_info.id,
-            filename=file_info.filename,
-            size=fetched.size,
-        )
+        logger.info(f"file_downloaded file_id={file_info.id} filename={file_info.filename} size={fetched.size}")
         return fetched

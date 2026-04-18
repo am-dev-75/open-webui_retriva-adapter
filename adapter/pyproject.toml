@@ -13,7 +13,7 @@ dependencies = [
     "pydantic-settings>=2.7,<3",
     "aiosqlite>=0.21,<1",
     "apscheduler>=3.11,<4",
-    "structlog>=25.1,<26",
+
     "prometheus-client>=0.22,<1",
 ]
 

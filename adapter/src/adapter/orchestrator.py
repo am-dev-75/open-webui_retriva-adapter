@@ -7,7 +7,7 @@ import hashlib
 import time
 
 import httpx
-import structlog
+
 
 from adapter import metrics
 from adapter.fetcher import FileFetcher
@@ -16,7 +16,9 @@ from adapter.models import SyncResult
 from adapter.observer import FileObserver
 from adapter.retriva_client import RetrivaClient
 
-logger = structlog.get_logger(__name__)
+from adapter.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SyncOrchestrator:
@@ -74,12 +76,7 @@ class SyncOrchestrator:
                     result.ingested += 1
                     metrics.files_synced_total.inc()
                 except (httpx.HTTPError, Exception) as exc:
-                    logger.error(
-                        "ingest_failed",
-                        file_id=file_info.id,
-                        filename=file_info.filename,
-                        error=str(exc),
-                    )
+                    logger.error(f"ingest_failed file_id={file_info.id} filename={file_info.filename} error={exc}")
                     # Try to create a failed mapping so we retry later
                     try:
                         await self._store.create(
@@ -106,11 +103,7 @@ class SyncOrchestrator:
                     result.deleted += 1
                     metrics.files_deleted_total.inc()
                 except (httpx.HTTPError, Exception) as exc:
-                    logger.error(
-                        "delete_failed",
-                        owui_file_id=owui_file_id,
-                        error=str(exc),
-                    )
+                    logger.error(f"delete_failed owui_file_id={owui_file_id} error={exc}")
                     result.failed += 1
                     result.errors.append(f"delete:{owui_file_id}:{exc}")
                     metrics.sync_errors_total.inc()
@@ -155,41 +148,25 @@ class SyncOrchestrator:
 
                     result.retried += 1
                     metrics.files_synced_total.inc()
-                    logger.info(
-                        "retry_succeeded",
-                        owui_file_id=mapping.owui_file_id,
-                        doc_id=doc_id,
-                    )
+                    logger.info(f"retry_succeeded owui_file_id={mapping.owui_file_id} doc_id={doc_id}")
                 except Exception as exc:
-                    logger.warning(
-                        "retry_failed",
-                        owui_file_id=mapping.owui_file_id,
-                        error=str(exc),
-                    )
+                    logger.warning(f"retry_failed owui_file_id={mapping.owui_file_id} error={exc}")
                     # Leave as 'failed' for next cycle
 
             # --- 5. Prune ---
             await self._store.prune_deleted()
 
         except httpx.HTTPError as exc:
-            logger.error("sync_cycle_failed", error=str(exc))
+            logger.error(f"sync_cycle_failed error={exc}")
             result.errors.append(f"cycle:{exc}")
             metrics.sync_errors_total.inc()
         except Exception as exc:
-            logger.exception("sync_cycle_unexpected_error", error=str(exc))
+            logger.exception(f"sync_cycle_unexpected_error error={exc}")
             result.errors.append(f"unexpected:{exc}")
             metrics.sync_errors_total.inc()
 
         elapsed = time.monotonic() - start
         metrics.poll_duration_seconds.observe(elapsed)
 
-        logger.info(
-            "sync_cycle_complete",
-            ingested=result.ingested,
-            deleted=result.deleted,
-            failed=result.failed,
-            retried=result.retried,
-            skipped=result.skipped,
-            duration_s=round(elapsed, 3),
-        )
+        logger.info(f"sync_cycle_complete ingested={result.ingested} deleted={result.deleted} failed={result.failed} retried={result.retried} skipped={result.skipped} duration_s={round(elapsed, 3)}")
         return result

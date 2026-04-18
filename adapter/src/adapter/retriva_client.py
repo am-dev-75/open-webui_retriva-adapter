@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import httpx
-import structlog
+
 
 from adapter.config import Settings
 from adapter.models import FetchedFile
 
-logger = structlog.get_logger(__name__)
+from adapter.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class RetrivaClient:
@@ -55,12 +57,7 @@ class RetrivaClient:
         # Retriva may return doc_id directly or inside a wrapper
         doc_id: str = body.get("doc_id") or body.get("id") or str(body)
 
-        logger.info(
-            "retriva_ingested",
-            file_id=fetched.file_id,
-            filename=fetched.filename,
-            doc_id=doc_id,
-        )
+        logger.info(f"retriva_ingested file_id={fetched.file_id} filename={fetched.filename} doc_id={doc_id}")
         return doc_id
 
     async def delete_document(self, doc_id: str) -> None:
@@ -72,7 +69,7 @@ class RetrivaClient:
         response = await self._client.delete(url, headers=self._headers())
         response.raise_for_status()
 
-        logger.info("retriva_deleted", doc_id=doc_id)
+        logger.info(f"retriva_deleted doc_id={doc_id}")
 
     async def health(self) -> bool:
         """Check if Retriva is reachable."""
