@@ -1,6 +1,6 @@
 # Open WebUI/Retriva Adapter
 
-Thin adapter that mirrors Open WebUI file uploads into Retriva knowledge base.
+Thin adapter that mirrors Open WebUI file uploads into Retriva knowledge base. To date, PDF files are supported.
 
 ## Quick start
 
