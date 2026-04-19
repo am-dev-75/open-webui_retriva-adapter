@@ -15,7 +15,6 @@ dependencies = [
     "apscheduler>=3.11,<4",
 
     "prometheus-client>=0.22,<1",
-    "pdfplumber>=0.11,<1",
 ]
 
 [project.optional-dependencies]

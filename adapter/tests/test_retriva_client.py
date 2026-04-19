@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import httpx
@@ -11,7 +12,6 @@ import respx
 
 from adapter.config import Settings
 from adapter.models import FetchedFile
-from adapter.pdf_extractor import PdfExtractionResult, PdfPage
 from adapter.retriva_client import RetrivaClient
 
 
@@ -41,7 +41,10 @@ class TestRetrivaClientRouting:
         assert doc_id == "owui:f-1"
         assert route.called
         payload = route.calls[0].request
-        assert b'"content_text"' in payload.content
+        
+        # Verify it's a multipart upload
+        assert "multipart/form-data" in payload.headers["content-type"]
+        assert b"Hello world" in payload.content
 
     @respx.mock
     async def test_ingest_html_routes_to_html_endpoint(
@@ -65,8 +68,6 @@ class TestRetrivaClientRouting:
 
         assert doc_id == "owui:f-2"
         assert route.called
-        payload = route.calls[0].request
-        assert b'"html_content"' in payload.content
 
     async def test_ingest_unsupported_type_raises(
         self, settings: Settings,
@@ -110,20 +111,10 @@ class TestRetrivaClientPdf:
     """RetrivaClient PDF ingestion tests."""
 
     @respx.mock
-    async def test_ingest_pdf_sends_per_page_requests(
+    async def test_ingest_pdf_forwards_multipart(
         self, settings: Settings,
     ) -> None:
-        """Each PDF page should generate a separate POST to /api/v1/ingest/pdf."""
-        extraction = PdfExtractionResult(
-            title="Test Document",
-            pages=[
-                PdfPage(page_number=1, text="Page one content"),
-                PdfPage(page_number=2, text="Page two content"),
-            ],
-            total_pages=3,
-            skipped_pages=1,
-        )
-
+        """PDFs should be forwarded natively via multipart."""
         route = respx.post(
             f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/pdf",
         ).mock(
@@ -135,85 +126,23 @@ class TestRetrivaClientPdf:
         fetched = FetchedFile(
             file_id="f-pdf", filename="report.pdf",
             content_type="application/pdf",
-            content=b"fake-pdf-bytes", size=14,
+            content=b"%PDF-1.4...", size=14,
         )
 
-        with patch("adapter.retriva_client.extract_pdf", return_value=extraction):
-            async with httpx.AsyncClient() as client:
-                rc = RetrivaClient(settings, client)
-                doc_id = await rc.ingest(fetched)
+        async with httpx.AsyncClient() as client:
+            rc = RetrivaClient(settings, client)
+            doc_id = await rc.ingest(fetched)
 
         assert doc_id == "owui:f-pdf"
-        # One request per page with text (2 pages)
-        assert route.call_count == 2
-
-    @respx.mock
-    async def test_ingest_pdf_page_payload_format(
-        self, settings: Settings,
-    ) -> None:
-        """Verify the JSON payload matches Retriva's PdfIngestRequest schema."""
-        extraction = PdfExtractionResult(
-            title="My Report",
-            pages=[PdfPage(page_number=3, text="Third page text")],
-            total_pages=5,
-            skipped_pages=4,
-        )
-
-        route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/pdf",
-        ).mock(
-            return_value=httpx.Response(
-                202, json={"status": "accepted", "message": "ok", "job_id": "j-1"},
-            ),
-        )
-
-        fetched = FetchedFile(
-            file_id="f-5", filename="report.pdf",
-            content_type="application/pdf",
-            content=b"pdf-bytes", size=9,
-        )
-
-        with patch("adapter.retriva_client.extract_pdf", return_value=extraction):
-            async with httpx.AsyncClient() as client:
-                rc = RetrivaClient(settings, client)
-                await rc.ingest(fetched)
-
-        import json
-        payload = json.loads(route.calls[0].request.content)
-        assert payload["source_path"] == "owui:f-5"
-        assert payload["page_title"] == "My Report"
-        assert payload["content_text"] == "Third page text"
-        assert payload["page_number"] == 3
-        assert payload["total_pages"] == 5
-
-    async def test_ingest_pdf_unreadable_raises(
-        self, settings: Settings,
-    ) -> None:
-        """Unreadable PDFs should raise ValueError."""
-        fetched = FetchedFile(
-            file_id="f-bad", filename="corrupt.pdf",
-            content_type="application/pdf",
-            content=b"not-a-pdf", size=9,
-        )
-
-        with patch("adapter.retriva_client.extract_pdf", return_value=None):
-            async with httpx.AsyncClient() as client:
-                rc = RetrivaClient(settings, client)
-                with pytest.raises(ValueError, match="Cannot extract text"):
-                    await rc.ingest(fetched)
+        assert route.called
+        assert "multipart/form-data" in route.calls[0].request.headers["content-type"]
+        assert b"%PDF-1.4..." in route.calls[0].request.content
 
     @respx.mock
     async def test_ingest_pdf_server_error_raises(
         self, settings: Settings,
     ) -> None:
         """HTTP errors from Retriva should propagate."""
-        extraction = PdfExtractionResult(
-            title="Broken",
-            pages=[PdfPage(page_number=1, text="text")],
-            total_pages=1,
-            skipped_pages=0,
-        )
-
         respx.post(
             f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/pdf",
         ).mock(
@@ -226,11 +155,10 @@ class TestRetrivaClientPdf:
             content=b"pdf", size=3,
         )
 
-        with patch("adapter.retriva_client.extract_pdf", return_value=extraction):
-            async with httpx.AsyncClient() as client:
-                rc = RetrivaClient(settings, client)
-                with pytest.raises(httpx.HTTPStatusError):
-                    await rc.ingest(fetched)
+        async with httpx.AsyncClient() as client:
+            rc = RetrivaClient(settings, client)
+            with pytest.raises(httpx.HTTPStatusError):
+                await rc.ingest(fetched)
 
 
 class TestRetrivaClientDeleteHealth:

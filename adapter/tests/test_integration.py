@@ -6,8 +6,8 @@ client, orchestrator, mapping store) with only the HTTP layer mocked via
 respx. SQLite is real (in-memory temp path).
 
 The adapter routes files to format-specific Retriva endpoints based on
-content type. For PDFs, text is extracted locally before forwarding.
-These tests mock the extraction layer to focus on orchestration logic.
+content type. For PDFs and other files, they are forwarded directly via
+multipart uploads.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from adapter.fetcher import FileFetcher
 from adapter.mapping_store import MappingStore
 from adapter.observer import FileObserver
 from adapter.orchestrator import SyncOrchestrator
-from adapter.pdf_extractor import PdfExtractionResult, PdfPage
 from adapter.retriva_client import RetrivaClient
 
 
@@ -61,15 +60,6 @@ async def int_stack(int_settings: Settings):
         }
 
     await store.close()
-
-
-# Shared mock extraction result for PDF tests
-_MOCK_PDF_EXTRACTION = PdfExtractionResult(
-    title="Test Document",
-    pages=[PdfPage(page_number=1, text="Fake page content for testing.")],
-    total_pages=1,
-    skipped_pages=0,
-)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -114,8 +104,7 @@ class TestUploadAndIngestFlow:
             ),
         )
 
-        with patch("adapter.retriva_client.extract_pdf", return_value=_MOCK_PDF_EXTRACTION):
-            result = await int_stack["orchestrator"].run_cycle()
+        result = await int_stack["orchestrator"].run_cycle()
 
         # Verify result
         assert result.ingested == 1
@@ -167,8 +156,7 @@ class TestUploadAndIngestFlow:
             ),
         )
 
-        with patch("adapter.retriva_client.extract_pdf", return_value=_MOCK_PDF_EXTRACTION):
-            result = await int_stack["orchestrator"].run_cycle()
+        result = await int_stack["orchestrator"].run_cycle()
 
         assert result.ingested == 3
         assert result.failed == 0

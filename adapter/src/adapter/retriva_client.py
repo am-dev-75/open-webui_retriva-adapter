@@ -2,28 +2,33 @@
 """Retriva API client — forwards files for ingestion and propagates deletions.
 
 Routes files to the correct format-specific Retriva endpoint based on
-content type. For PDFs, text is extracted page-by-page and submitted
-individually to ``/api/v1/ingest/pdf``.
+content type. The adapter does not parse files itself; it delegates all
+extraction and chunking to the Retriva backend.
 """
 
 from __future__ import annotations
-
-import uuid
 
 import httpx
 
 from adapter.config import Settings
 from adapter.models import FetchedFile
-from adapter.pdf_extractor import extract_pdf
 
 from adapter.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Content types we know how to route
-_PDF_TYPES = {"application/pdf"}
-_HTML_TYPES = {"text/html", "application/xhtml+xml"}
-_TEXT_TYPES = {"text/plain", "text/markdown", "text/csv"}
+# Routing table: content type prefix/exact -> endpoint path
+_ROUTING_TABLE = {
+    "application/pdf": "/api/v1/ingest/upload/pdf",
+    "text/plain": "/api/v1/ingest/text",
+    "text/markdown": "/api/v1/ingest/markdown",
+    "application/markdown": "/api/v1/ingest/markdown",
+    "text/csv": "/api/v1/ingest/text",
+    "text/html": "/api/v1/ingest/html",
+    "application/xhtml+xml": "/api/v1/ingest/html",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "/api/v1/ingest/docx",
+    "image/": "/api/v1/ingest/image",
+}
 
 
 class RetrivaClient:
@@ -34,8 +39,8 @@ class RetrivaClient:
         self._api_key = settings.RETRIVA_API_KEY
         self._client = client
 
-    def _headers(self) -> dict[str, str]:
-        h: dict[str, str] = {"Content-Type": "application/json"}
+    def _auth_headers(self) -> dict[str, str]:
+        h: dict[str, str] = {}
         if self._api_key:
             h["Authorization"] = f"Bearer {self._api_key}"
         return h
@@ -52,18 +57,15 @@ class RetrivaClient:
         Raises on HTTP errors.
         """
         content_type = (fetched.content_type or "").split(";")[0].strip().lower()
-
-        if content_type in _PDF_TYPES:
-            return await self._ingest_pdf(fetched)
-        elif content_type in _HTML_TYPES:
-            return await self._ingest_html(fetched)
-        elif content_type in _TEXT_TYPES:
-            return await self._ingest_text(fetched)
-        else:
+        
+        endpoint_path = self._determine_endpoint(content_type)
+        if not endpoint_path:
             raise ValueError(
                 f"Unsupported content type '{content_type}' for file "
-                f"'{fetched.filename}'. Supported types: PDF, HTML, plain text."
+                f"'{fetched.filename}'."
             )
+
+        return await self._forward_multipart(fetched, endpoint_path, content_type)
 
     async def delete_document(self, doc_id: str) -> None:
         """Delete a document from Retriva by its doc_id.
@@ -71,7 +73,7 @@ class RetrivaClient:
         Raises on HTTP errors.
         """
         url = f"{self._base_url}/api/v1/documents/{doc_id}"
-        response = await self._client.delete(url, headers=self._headers())
+        response = await self._client.delete(url, headers=self._auth_headers())
         response.raise_for_status()
 
         logger.info(f"retriva_deleted doc_id={doc_id}")
@@ -80,102 +82,53 @@ class RetrivaClient:
         """Check if Retriva is reachable."""
         url = f"{self._base_url}/healthz"
         try:
-            response = await self._client.get(url, headers=self._headers())
+            response = await self._client.get(url, headers=self._auth_headers())
             return response.status_code == 200  # noqa: PLR2004
         except httpx.HTTPError:
             return False
 
     # ------------------------------------------------------------------
-    # Format-specific ingestion
+    # Format-specific routing
     # ------------------------------------------------------------------
 
-    async def _ingest_pdf(self, fetched: FetchedFile) -> str:
-        """Extract text from PDF and send page-by-page to Retriva."""
-        extraction = extract_pdf(fetched.content, fetched.filename)
-        if extraction is None:
-            raise ValueError(
-                f"Cannot extract text from PDF '{fetched.filename}' "
-                f"(corrupt, encrypted, or empty)."
-            )
+    def _determine_endpoint(self, content_type: str) -> str | None:
+        """Find the matching Retriva ingestion endpoint for the content type."""
+        for key, path in _ROUTING_TABLE.items():
+            if content_type == key or (key.endswith("/") and content_type.startswith(key)):
+                return path
+        return None
 
-        url = f"{self._base_url}/api/v1/ingest/pdf"
+    async def _forward_multipart(
+        self, fetched: FetchedFile, endpoint_path: str, content_type: str,
+    ) -> str:
+        """Send the file as a multipart/form-data upload to Retriva."""
+        url = f"{self._base_url}{endpoint_path}"
         doc_id = f"owui:{fetched.file_id}"
-        job_ids: list[str] = []
 
-        for page in extraction.pages:
-            payload = {
-                "source_path": doc_id,
-                "page_title": extraction.title,
-                "content_text": page.text,
-                "page_number": page.page_number,
-                "total_pages": extraction.total_pages,
-            }
+        # Typically Retriva expects the file as 'file' and metadata as 'data'
+        files = {
+            "file": (fetched.filename, fetched.content, content_type),
+        }
+        data = {
+            "source_path": doc_id,
+            "page_title": fetched.filename,
+        }
 
-            response = await self._client.post(
-                url, headers=self._headers(), json=payload,
-            )
-            response.raise_for_status()
+        response = await self._client.post(
+            url,
+            headers=self._auth_headers(),
+            data=data,
+            files=files,
+        )
+        response.raise_for_status()
 
-            body = response.json()
-            job_id = body.get("job_id", "")
-            if job_id:
-                job_ids.append(job_id)
-
-            logger.debug(
-                f"retriva_pdf_page_sent file_id={fetched.file_id} "
-                f"page={page.page_number}/{extraction.total_pages} "
-                f"job_id={job_id}"
-            )
+        body = response.json()
+        job_id = body.get("job_id", "")
 
         logger.info(
             f"retriva_ingested file_id={fetched.file_id} "
             f"filename={fetched.filename} doc_id={doc_id} "
-            f"pages={len(extraction.pages)} jobs={len(job_ids)}"
+            f"endpoint={endpoint_path} job_id={job_id}"
         )
         return doc_id
 
-    async def _ingest_html(self, fetched: FetchedFile) -> str:
-        """Decode HTML bytes and send to Retriva."""
-        url = f"{self._base_url}/api/v1/ingest/html"
-        doc_id = f"owui:{fetched.file_id}"
-
-        html_content = fetched.content.decode("utf-8", errors="replace")
-        payload = {
-            "source_path": doc_id,
-            "page_title": fetched.filename,
-            "html_content": html_content,
-        }
-
-        response = await self._client.post(
-            url, headers=self._headers(), json=payload,
-        )
-        response.raise_for_status()
-
-        logger.info(
-            f"retriva_ingested file_id={fetched.file_id} "
-            f"filename={fetched.filename} doc_id={doc_id}"
-        )
-        return doc_id
-
-    async def _ingest_text(self, fetched: FetchedFile) -> str:
-        """Decode text bytes and send to Retriva."""
-        url = f"{self._base_url}/api/v1/ingest/text"
-        doc_id = f"owui:{fetched.file_id}"
-
-        content_text = fetched.content.decode("utf-8", errors="replace")
-        payload = {
-            "source_path": doc_id,
-            "page_title": fetched.filename,
-            "content_text": content_text,
-        }
-
-        response = await self._client.post(
-            url, headers=self._headers(), json=payload,
-        )
-        response.raise_for_status()
-
-        logger.info(
-            f"retriva_ingested file_id={fetched.file_id} "
-            f"filename={fetched.filename} doc_id={doc_id}"
-        )
-        return doc_id
