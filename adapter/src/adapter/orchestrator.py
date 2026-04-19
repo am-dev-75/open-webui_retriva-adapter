@@ -70,6 +70,7 @@ class SyncOrchestrator:
                         owui_file_id=file_info.id,
                         filename=file_info.filename,
                         retriva_doc_id=doc_id,
+                        content_type=file_info.content_type,
                         content_hash=content_hash,
                         status="synced",
                     )
@@ -83,6 +84,7 @@ class SyncOrchestrator:
                             owui_file_id=file_info.id,
                             filename=file_info.filename,
                             retriva_doc_id="",
+                            content_type=file_info.content_type,
                             status="failed",
                         )
                     except Exception:
@@ -118,6 +120,7 @@ class SyncOrchestrator:
                     file_info = OWUIFile(
                         id=mapping.owui_file_id,
                         filename=mapping.filename,
+                        content_type=mapping.content_type,
                     )
                     fetched = await self._fetcher.download(file_info)
                     if fetched is None:

@@ -24,7 +24,7 @@ class TestFileObserver:
     @respx.mock
     async def test_list_files_bare_list(self, settings: Settings) -> None:
         """OWUI returns a bare JSON list."""
-        respx.get(f"{settings.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{settings.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[
                 {
                     "id": "f-1",
@@ -47,7 +47,7 @@ class TestFileObserver:
     @respx.mock
     async def test_list_files_wrapped(self, settings: Settings) -> None:
         """OWUI returns files in a {data: [...]} wrapper."""
-        respx.get(f"{settings.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{settings.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json={
                 "data": [{"id": "f-2", "filename": "notes.txt", "meta": {}}],
             }),

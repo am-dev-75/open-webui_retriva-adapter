@@ -4,11 +4,16 @@
 These tests wire all real components together (observer, fetcher, Retriva
 client, orchestrator, mapping store) with only the HTTP layer mocked via
 respx. SQLite is real (in-memory temp path).
+
+The adapter routes files to format-specific Retriva endpoints based on
+content type. For PDFs, text is extracted locally before forwarding.
+These tests mock the extraction layer to focus on orchestration logic.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -19,6 +24,7 @@ from adapter.fetcher import FileFetcher
 from adapter.mapping_store import MappingStore
 from adapter.observer import FileObserver
 from adapter.orchestrator import SyncOrchestrator
+from adapter.pdf_extractor import PdfExtractionResult, PdfPage
 from adapter.retriva_client import RetrivaClient
 
 
@@ -57,6 +63,15 @@ async def int_stack(int_settings: Settings):
     await store.close()
 
 
+# Shared mock extraction result for PDF tests
+_MOCK_PDF_EXTRACTION = PdfExtractionResult(
+    title="Test Document",
+    pages=[PdfPage(page_number=1, text="Fake page content for testing.")],
+    total_pages=1,
+    skipped_pages=0,
+)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Flow 1: Upload Detection + Ingestion
 # ──────────────────────────────────────────────────────────────────────
@@ -70,8 +85,8 @@ class TestUploadAndIngestFlow:
     ) -> None:
         s = int_stack["settings"]
 
-        # OWUI returns one file
-        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files").mock(
+        # OWUI returns one file (PDF)
+        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[
                 {
                     "id": "file-abc",
@@ -92,13 +107,15 @@ class TestUploadAndIngestFlow:
             return_value=httpx.Response(200, content=file_content),
         )
 
-        # Retriva ingestion succeeds
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest").mock(
-            return_value=httpx.Response(200, json={"doc_id": "retriva-doc-001"}),
+        # Retriva PDF ingestion endpoint
+        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/pdf").mock(
+            return_value=httpx.Response(
+                202, json={"status": "accepted", "message": "ok", "job_id": "j-1"},
+            ),
         )
 
-        # Run sync cycle
-        result = await int_stack["orchestrator"].run_cycle()
+        with patch("adapter.retriva_client.extract_pdf", return_value=_MOCK_PDF_EXTRACTION):
+            result = await int_stack["orchestrator"].run_cycle()
 
         # Verify result
         assert result.ingested == 1
@@ -109,7 +126,7 @@ class TestUploadAndIngestFlow:
         mapping = await int_stack["store"].get_by_file_id("file-abc")
         assert mapping is not None
         assert mapping.filename == "report.pdf"
-        assert mapping.retriva_doc_id == "retriva-doc-001"
+        assert mapping.retriva_doc_id == "owui:file-abc"
         assert mapping.status == "synced"
         assert mapping.content_hash != ""  # SHA-256 was computed
 
@@ -119,11 +136,11 @@ class TestUploadAndIngestFlow:
     ) -> None:
         s = int_stack["settings"]
 
-        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[
-                {"id": "f1", "filename": "a.txt", "meta": {}},
-                {"id": "f2", "filename": "b.pdf", "meta": {}},
-                {"id": "f3", "filename": "c.md", "meta": {}},
+                {"id": "f1", "filename": "a.txt", "meta": {"content_type": "text/plain"}},
+                {"id": "f2", "filename": "b.pdf", "meta": {"content_type": "application/pdf"}},
+                {"id": "f3", "filename": "c.md", "meta": {"content_type": "text/plain"}},
             ]),
         )
 
@@ -137,18 +154,21 @@ class TestUploadAndIngestFlow:
             return_value=httpx.Response(200, content=b"content-c"),
         )
 
-        call_count = 0
-
-        def ingest_handler(request: httpx.Request) -> httpx.Response:
-            nonlocal call_count
-            call_count += 1
-            return httpx.Response(200, json={"doc_id": f"doc-{call_count}"})
-
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest").mock(
-            side_effect=ingest_handler,
+        # Text endpoint for .txt and .md files
+        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text").mock(
+            return_value=httpx.Response(
+                202, json={"status": "accepted", "message": "ok", "job_id": "j-t"},
+            ),
+        )
+        # PDF endpoint for .pdf files
+        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/pdf").mock(
+            return_value=httpx.Response(
+                202, json={"status": "accepted", "message": "ok", "job_id": "j-p"},
+            ),
         )
 
-        result = await int_stack["orchestrator"].run_cycle()
+        with patch("adapter.retriva_client.extract_pdf", return_value=_MOCK_PDF_EXTRACTION):
+            result = await int_stack["orchestrator"].run_cycle()
 
         assert result.ingested == 3
         assert result.failed == 0
@@ -176,7 +196,7 @@ class TestIdempotencyFlow:
         await store.create("file-existing", "old.pdf", "doc-existing")
 
         # OWUI still has the same file
-        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[
                 {"id": "file-existing", "filename": "old.pdf", "meta": {}},
             ]),
@@ -187,8 +207,8 @@ class TestIdempotencyFlow:
             f"{s.OWUI_BASE_URL}/api/v1/files/file-existing/content",
         ).mock(return_value=httpx.Response(200, content=b"x"))
         ingest_route = respx.post(
-            f"{s.RETRIVA_BASE_URL}/api/v1/ingest",
-        ).mock(return_value=httpx.Response(200, json={"doc_id": "dup"}))
+            f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text",
+        ).mock(return_value=httpx.Response(202, json={"status": "accepted", "message": "ok"}))
 
         result = await int_stack["orchestrator"].run_cycle()
 
@@ -258,7 +278,7 @@ class TestDeleteFlow:
         await store.create("file-to-delete", "deleteme.pdf", "doc-del-001")
 
         # OWUI no longer has this file
-        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[]),
         )
 
@@ -287,7 +307,7 @@ class TestDeleteFlow:
         await store.create("f-keep", "keep.pdf", "doc-keep")
 
         # OWUI only has f-keep
-        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[
                 {"id": "f-keep", "filename": "keep.pdf", "meta": {}},
             ]),
@@ -316,7 +336,7 @@ class TestDeleteFlow:
 
         await store.create("f-stubborn", "stubborn.pdf", "doc-stubborn")
 
-        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[]),
         )
 
@@ -349,13 +369,13 @@ class TestRetryFlow:
         store = int_stack["store"]
 
         # --- Cycle 1: file appears, ingestion fails ---
-        # The orchestrator retries failed mappings within the same cycle,
-        # so we must fail BOTH the initial ingest AND the in-cycle retry
-        # to leave the mapping in 'failed' state after cycle 1.
-
-        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files").mock(
+        respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/").mock(
             return_value=httpx.Response(200, json=[
-                {"id": "f-retry", "filename": "retry.pdf", "meta": {}},
+                {
+                    "id": "f-retry",
+                    "filename": "retry.txt",
+                    "meta": {"content_type": "text/plain"},
+                },
             ]),
         )
         respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/f-retry/content").mock(
@@ -370,9 +390,11 @@ class TestRetryFlow:
             call_count += 1
             if call_count <= 2:
                 return httpx.Response(503, json={"error": "overloaded"})
-            return httpx.Response(200, json={"doc_id": "doc-retried"})
+            return httpx.Response(
+                202, json={"status": "accepted", "message": "ok", "job_id": "j-retry"},
+            )
 
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest").mock(
+        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text").mock(
             side_effect=ingest_handler,
         )
 
@@ -393,7 +415,7 @@ class TestRetryFlow:
         mapping = await store.get_by_file_id("f-retry")
         assert mapping is not None
         assert mapping.status == "synced"
-        assert mapping.retriva_doc_id == "doc-retried"
+        assert mapping.retriva_doc_id == "owui:f-retry"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -412,17 +434,23 @@ class TestFullLifecycleFlow:
 
         # --- Cycle 1: File appears in OWUI → ingested ---
 
-        file_list_route = respx.get(f"{s.OWUI_BASE_URL}/api/v1/files")
+        file_list_route = respx.get(f"{s.OWUI_BASE_URL}/api/v1/files/")
         file_list_route.mock(
             return_value=httpx.Response(200, json=[
-                {"id": "f-lifecycle", "filename": "lifecycle.txt", "meta": {}},
+                {
+                    "id": "f-lifecycle",
+                    "filename": "lifecycle.txt",
+                    "meta": {"content_type": "text/plain"},
+                },
             ]),
         )
         respx.get(
             f"{s.OWUI_BASE_URL}/api/v1/files/f-lifecycle/content",
         ).mock(return_value=httpx.Response(200, content=b"lifecycle data"))
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest").mock(
-            return_value=httpx.Response(200, json={"doc_id": "doc-lc"}),
+        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text").mock(
+            return_value=httpx.Response(
+                202, json={"status": "accepted", "message": "ok", "job_id": "j-lc"},
+            ),
         )
 
         r1 = await int_stack["orchestrator"].run_cycle()
@@ -432,7 +460,7 @@ class TestFullLifecycleFlow:
         m = await store.get_by_file_id("f-lifecycle")
         assert m is not None
         assert m.status == "synced"
-        assert m.retriva_doc_id == "doc-lc"
+        assert m.retriva_doc_id == "owui:f-lifecycle"
 
         # --- Cycle 2: Same file still present → no-op ---
 
@@ -446,7 +474,7 @@ class TestFullLifecycleFlow:
             return_value=httpx.Response(200, json=[]),
         )
         delete_route = respx.delete(
-            f"{s.RETRIVA_BASE_URL}/api/v1/documents/doc-lc",
+            f"{s.RETRIVA_BASE_URL}/api/v1/documents/owui:f-lifecycle",
         ).mock(return_value=httpx.Response(200))
 
         r3 = await int_stack["orchestrator"].run_cycle()

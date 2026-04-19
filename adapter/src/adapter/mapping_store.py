@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS file_mappings (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     owui_file_id   TEXT    NOT NULL UNIQUE,
     filename       TEXT    NOT NULL,
+    content_type   TEXT    NOT NULL DEFAULT 'application/octet-stream',
     content_hash   TEXT,
     retriva_doc_id TEXT    NOT NULL,
     status         TEXT    NOT NULL DEFAULT 'synced',
@@ -73,6 +74,7 @@ class MappingStore:
         owui_file_id: str,
         filename: str,
         retriva_doc_id: str,
+        content_type: str = "application/octet-stream",
         content_hash: str = "",
         status: str = "synced",
     ) -> MappingRecord:
@@ -82,12 +84,12 @@ class MappingStore:
             cursor = await self._conn.execute(
                 """
                 INSERT INTO file_mappings
-                    (owui_file_id, filename, content_hash, retriva_doc_id,
-                     status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (owui_file_id, filename, content_type, content_hash,
+                     retriva_doc_id, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (owui_file_id, filename, content_hash, retriva_doc_id,
-                 status, now, now),
+                (owui_file_id, filename, content_type, content_hash,
+                 retriva_doc_id, status, now, now),
             )
             await self._conn.commit()
             row_id = cursor.lastrowid
@@ -97,6 +99,7 @@ class MappingStore:
             id=row_id,
             owui_file_id=owui_file_id,
             filename=filename,
+            content_type=content_type,
             content_hash=content_hash,
             retriva_doc_id=retriva_doc_id,
             status=status,
@@ -176,6 +179,7 @@ class MappingStore:
             id=row["id"],
             owui_file_id=row["owui_file_id"],
             filename=row["filename"],
+            content_type=row["content_type"],
             content_hash=row["content_hash"] or "",
             retriva_doc_id=row["retriva_doc_id"],
             status=row["status"],

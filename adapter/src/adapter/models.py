@@ -49,6 +49,7 @@ class MappingRecord:
     id: int | None = None
     owui_file_id: str = ""
     filename: str = ""
+    content_type: str = "application/octet-stream"
     content_hash: str = ""
     retriva_doc_id: str = ""
     status: str = "synced"  # synced | failed | deleting | deleted
