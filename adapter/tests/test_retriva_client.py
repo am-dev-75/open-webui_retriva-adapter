@@ -116,7 +116,7 @@ class TestRetrivaClientPdf:
     ) -> None:
         """PDFs should be forwarded natively via multipart."""
         route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/pdf",
+            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/upload/pdf",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-pdf"},
@@ -144,7 +144,7 @@ class TestRetrivaClientPdf:
     ) -> None:
         """HTTP errors from Retriva should propagate."""
         respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/pdf",
+            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/upload/pdf",
         ).mock(
             return_value=httpx.Response(500, json={"detail": "internal error"}),
         )
@@ -190,3 +190,70 @@ class TestRetrivaClientDeleteHealth:
         async with httpx.AsyncClient() as client:
             rc = RetrivaClient(settings, client)
             assert await rc.health() is False
+
+
+class TestRetrivaClientMetadataForwarding:
+    """Verify kb_ids and user_metadata are forwarded in form data."""
+
+    @respx.mock
+    async def test_ingest_with_kb_ids_and_metadata(
+        self, settings: Settings,
+    ) -> None:
+        """FetchedFile with kb_ids and user_metadata should include them in the request."""
+        route = respx.post(
+            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/text",
+        ).mock(
+            return_value=httpx.Response(
+                202, json={"status": "accepted", "message": "ok", "job_id": "j-meta"},
+            ),
+        )
+
+        fetched = FetchedFile(
+            file_id="f-meta", filename="tagged.txt",
+            content_type="text/plain", content=b"tagged content", size=14,
+            kb_ids=("kb-1", "kb-2"),
+            user_metadata=(("project", "Apollo"), ("milestone", "M4")),
+        )
+        async with httpx.AsyncClient() as client:
+            rc = RetrivaClient(settings, client)
+            doc_id = await rc.ingest(fetched)
+
+        assert doc_id == "owui:f-meta"
+        assert route.called
+
+        body = route.calls[0].request.content.decode("utf-8", errors="replace")
+        # Verify kb_ids is present as JSON
+        assert "kb_ids" in body
+        assert "kb-1" in body
+        assert "kb-2" in body
+        # Verify user_metadata is present as JSON
+        assert "user_metadata" in body
+        assert "Apollo" in body
+        assert "M4" in body
+
+    @respx.mock
+    async def test_ingest_without_metadata_omits_fields(
+        self, settings: Settings,
+    ) -> None:
+        """FetchedFile without metadata should not include extra fields."""
+        route = respx.post(
+            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/text",
+        ).mock(
+            return_value=httpx.Response(
+                202, json={"status": "accepted", "message": "ok"},
+            ),
+        )
+
+        fetched = FetchedFile(
+            file_id="f-plain", filename="plain.txt",
+            content_type="text/plain", content=b"plain", size=5,
+        )
+        async with httpx.AsyncClient() as client:
+            rc = RetrivaClient(settings, client)
+            await rc.ingest(fetched)
+
+        assert route.called
+        body = route.calls[0].request.content.decode("utf-8", errors="replace")
+        # Should NOT contain kb_ids or user_metadata form fields
+        assert "kb_ids" not in body
+        assert "user_metadata" not in body

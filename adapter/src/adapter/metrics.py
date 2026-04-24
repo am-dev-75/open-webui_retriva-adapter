@@ -25,3 +25,19 @@ poll_duration_seconds = Histogram(
     "Duration of a single poll-and-sync cycle in seconds",
     buckets=(0.5, 1, 2, 5, 10, 30, 60, 120),
 )
+
+directives_processed_total = Counter(
+    "adapter_directives_processed_total",
+    "Total directives parsed from chat messages",
+    ["action"],
+)
+
+webhook_messages_total = Counter(
+    "adapter_webhook_messages_total",
+    "Total chat messages received via webhook",
+)
+
+chat_messages_observed_total = Counter(
+    "adapter_chat_messages_observed_total",
+    "Total user chat messages observed via chat polling",
+)

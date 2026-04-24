@@ -28,6 +28,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_prefix="",
         case_sensitive=True,
+        populate_by_name=True,
     )
 
     # --- Required -----------------------------------------------------------
@@ -67,6 +68,28 @@ class Settings(BaseSettings):
         ge=1,
         le=65535,
         description="HTTP port for health/metrics/API",
+    )
+
+    # --- Metadata / KB --------------------------------------------------------
+    DEFAULT_KB_ID: str = Field(
+        default="",
+        description="Default Knowledge Base ID when none provided in webhook",
+    )
+    ENABLE_DEBUG_ENDPOINTS: bool = Field(
+        default=False,
+        description="Enable /internal/* debug endpoints (set THIN_ADAPTER_DEBUG_ENDPOINTS=true)",
+        validation_alias="THIN_ADAPTER_DEBUG_ENDPOINTS",
+    )
+
+    # --- Chat polling (directive observation) --------------------------------
+    CHAT_POLL_ENABLED: bool = Field(
+        default=True,
+        description="Enable chat message polling for directive detection",
+    )
+    CHAT_POLL_INTERVAL_SECONDS: int = Field(
+        default=5,
+        ge=1,
+        description="Seconds between chat message polling cycles (directive responsiveness)",
     )
 
     # --- Retry tuning --------------------------------------------------------

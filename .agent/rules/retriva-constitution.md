@@ -1,22 +1,21 @@
 ---
-description: Constitution for Thin Adapter (Pattern B-1)
+description: Constitution for Thin Adapter User Metadata Support
 alwaysApply: true
 ---
 
-# Retriva Constitution — Thin Adapter
+# Retriva Constitution — Thin Adapter Metadata
 
 ## Product law
-- Retriva remains the single source of truth for RAG
-- Open WebUI remains a pure UX client
-- The adapter mirrors file lifecycle only
+- User intent must be explicitly expressed by directives
+- Metadata is applied only when tagging is active
+- Knowledge Base selection always applies
 
 ## Architecture law
-- No forks of Open WebUI
-- Adapter communicates only through public APIs
-- Adapter failures must not break chat UX
+- Adapter is a translator, not an interpreter
+- No ingestion routing logic in the adapter
 
 ## Scope law
 Out of scope:
-- replacing Open WebUI Knowledge UI
-- direct vector manipulation
-- modifying Open WebUI internals
+- UI changes in Open WebUI
+- Metadata validation beyond shape
+- ingestion_api_v2 behavior

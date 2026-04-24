@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from pydantic import BaseModel
+
 
 # ---------------------------------------------------------------------------
 # Open WebUI file representation (subset of the OWUI response)
@@ -36,6 +38,12 @@ class FetchedFile:
     content_type: str
     content: bytes
     size: int
+    kb_ids: tuple[str, ...] = ()
+    user_metadata: tuple[tuple[str, str], ...] = ()
+
+    def metadata_dict(self) -> dict[str, str]:
+        """Return user_metadata as a plain dict."""
+        return dict(self.user_metadata)
 
 
 # ---------------------------------------------------------------------------
@@ -75,3 +83,16 @@ class SyncResult:
     retried: int = 0
     skipped: int = 0
     errors: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Chat webhook payload
+# ---------------------------------------------------------------------------
+
+class ChatMessagePayload(BaseModel):
+    """Payload received from Open WebUI via the chat message webhook."""
+
+    chat_id: str
+    message: str
+    kb_ids: list[str] = []
+    file_ids: list[str] = []

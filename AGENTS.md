@@ -1,24 +1,25 @@
-# Agent Instructions — Thin Adapter (Pattern B-1)
+# Agent Instructions — Thin Adapter User Metadata
 
 ## Mission
-Implement **Pattern B-1 — Thin Adapter** to mirror file uploads from **Open WebUI** into **Retriva** without modifying Open WebUI.
+Extend the Thin Adapter (Open WebUI → Retriva) to support **user-provided ingestion metadata**
+using chat directives combined with Knowledge Base selection.
 
-The adapter:
-- is written in **Python**
-- observes Open WebUI file lifecycle events
-- forwards uploaded files to Retriva ingestion APIs
-- keeps file ↔ document mappings
-- is designed to be containerized once stable
+The adapter must:
+- parse @@ingestion_tag_start and @@ingestion_tag_stop directives from chat messages
+- maintain a per-chat ingestion metadata context
+- replace metadata on each new @@ingestion_tag_start
+- disable metadata on @@ingestion_tag_stop
+- always populate kb_ids based on selected Knowledge Bases (Pattern A)
+- send user_metadata and kb_ids to ingestion_api_v1
 
 ## Order of authority
-1. `specs/012-thin-adapter-openwebui-retriva/spec.md`
-2. `specs/012-thin-adapter-openwebui-retriva/architecture.md`
-3. `.agent/rules/retriva-constitution.md`
-4. `specs/012-thin-adapter-openwebui-retriva/tasks.md`
+1. specs/015-thin-adapter-user-metadata/spec.md
+2. specs/015-thin-adapter-user-metadata/architecture.md
+3. .agent/rules/retriva-constitution.md
+4. specs/015-thin-adapter-user-metadata/tasks.md
 
 ## Non-negotiable rules
 - Do not modify Open WebUI source code
-- Do not modify Retriva core semantics
-- The adapter must be stateless except for durable mappings
-- Open WebUI native RAG must be disabled at query time
-- The adapter must be replaceable without downtime
+- Do not modify ingestion_api_v1 semantics beyond passing metadata
+- Metadata replacement semantics must be respected
+- Adapter logic must be deterministic and stateless across restarts

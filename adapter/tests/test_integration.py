@@ -98,7 +98,7 @@ class TestUploadAndIngestFlow:
         )
 
         # Retriva PDF ingestion endpoint
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/pdf").mock(
+        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/upload/pdf").mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-1"},
             ),
@@ -150,7 +150,7 @@ class TestUploadAndIngestFlow:
             ),
         )
         # PDF endpoint for .pdf files
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/pdf").mock(
+        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/upload/pdf").mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-p"},
             ),

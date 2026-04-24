@@ -1,1 +1,1 @@
-# /verify — Thin Adapter
+# /verify — Thin Adapter User Metadata

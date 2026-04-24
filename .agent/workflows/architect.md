@@ -1,1 +1,1 @@
-# /architect — Thin Adapter
+# /architect — Thin Adapter User Metadata

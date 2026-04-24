@@ -8,6 +8,8 @@ extraction and chunking to the Retriva backend.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from adapter.config import Settings
@@ -113,6 +115,12 @@ class RetrivaClient:
             "source_path": doc_id,
             "page_title": fetched.filename,
         }
+
+        # Forward metadata when present (Pattern A + revised Pattern D)
+        if fetched.kb_ids:
+            data["kb_ids"] = json.dumps(list(fetched.kb_ids))
+        if fetched.user_metadata:
+            data["user_metadata"] = json.dumps(fetched.metadata_dict())
 
         response = await self._client.post(
             url,

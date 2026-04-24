@@ -44,10 +44,20 @@ class FileFetcher:
         response.raise_for_status()
 
         content = response.content
+
+        # Prefer the HTTP response content-type when the OWUIFile has the
+        # generic default.  This matters for the webhook ingestion path
+        # where file metadata is not available upfront.
+        content_type = file_info.content_type
+        if content_type == "application/octet-stream":
+            resp_ct = response.headers.get("content-type", "")
+            if resp_ct:
+                content_type = resp_ct.split(";")[0].strip()
+
         fetched = FetchedFile(
             file_id=file_info.id,
             filename=file_info.filename,
-            content_type=file_info.content_type,
+            content_type=content_type,
             content=content,
             size=len(content),
         )

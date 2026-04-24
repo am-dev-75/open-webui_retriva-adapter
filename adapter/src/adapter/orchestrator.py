@@ -11,8 +11,9 @@ import httpx
 
 from adapter import metrics
 from adapter.fetcher import FileFetcher
+from adapter.ingestion_context import IngestionContext
 from adapter.mapping_store import MappingStore
-from adapter.models import SyncResult
+from adapter.models import FetchedFile, SyncResult
 from adapter.observer import FileObserver
 from adapter.retriva_client import RetrivaClient
 
@@ -30,11 +31,13 @@ class SyncOrchestrator:
         fetcher: FileFetcher,
         retriva: RetrivaClient,
         store: MappingStore,
+        ingestion_context: IngestionContext | None = None,
     ) -> None:
         self._observer = observer
         self._fetcher = fetcher
         self._retriva = retriva
         self._store = store
+        self._ingestion_ctx = ingestion_context
 
     async def run_cycle(self) -> SyncResult:
         """Execute one full sync cycle.
@@ -172,4 +175,111 @@ class SyncOrchestrator:
         metrics.poll_duration_seconds.observe(elapsed)
 
         logger.info(f"sync_cycle_complete ingested={result.ingested} deleted={result.deleted} failed={result.failed} retried={result.retried} skipped={result.skipped} duration_s={round(elapsed, 3)}")
+        return result
+
+    # ------------------------------------------------------------------
+    # Context-aware ingestion (webhook-triggered)
+    # ------------------------------------------------------------------
+
+    async def ingest_with_context(
+        self,
+        file_ids: list[str],
+        chat_id: str,
+    ) -> SyncResult:
+        """Ingest specific files with metadata from the chat ingestion context.
+
+        This is the webhook-triggered ingestion path.  Unlike ``run_cycle()``,
+        it ingests *only* the specified files and enriches them with
+        ``kb_ids`` and ``user_metadata`` from the active ingestion context.
+        """
+        result = SyncResult()
+
+        # Resolve metadata payload from the ingestion context
+        payload: dict = {}
+        if self._ingestion_ctx:
+            payload = self._ingestion_ctx.get_ingestion_payload(chat_id)
+
+        kb_ids = tuple(payload.get("kb_ids", []))
+        user_metadata = tuple(
+            (k, v) for k, v in payload.get("user_metadata", {}).items()
+        )
+
+        for file_id in file_ids:
+            try:
+                # Check if already synced
+                existing = await self._store.get_by_file_id(file_id)
+                if existing and existing.status == "synced":
+                    result.skipped += 1
+                    continue
+
+                # Build a minimal OWUIFile to drive the fetcher
+                from adapter.models import OWUIFile
+
+                file_info = OWUIFile(id=file_id, filename=f"webhook:{file_id}")
+
+                fetched = await self._fetcher.download(file_info)
+                if fetched is None:
+                    result.skipped += 1
+                    continue
+
+                # Enrich with context metadata
+                enriched = FetchedFile(
+                    file_id=fetched.file_id,
+                    filename=fetched.filename,
+                    content_type=fetched.content_type,
+                    content=fetched.content,
+                    size=fetched.size,
+                    kb_ids=kb_ids,
+                    user_metadata=user_metadata,
+                )
+
+                doc_id = await self._retriva.ingest(enriched)
+                content_hash = hashlib.sha256(enriched.content).hexdigest()
+
+                if existing:
+                    # Update failed → synced
+                    await self._store.update_status(file_id, "synced")
+                    conn = self._store._conn  # noqa: SLF001
+                    await conn.execute(
+                        """
+                        UPDATE file_mappings
+                        SET retriva_doc_id = ?, content_hash = ?
+                        WHERE owui_file_id = ?
+                        """,
+                        (doc_id, content_hash, file_id),
+                    )
+                    await conn.commit()
+                else:
+                    await self._store.create(
+                        owui_file_id=file_id,
+                        filename=fetched.filename,
+                        retriva_doc_id=doc_id,
+                        content_type=fetched.content_type,
+                        content_hash=content_hash,
+                        status="synced",
+                    )
+
+                result.ingested += 1
+                metrics.files_synced_total.inc()
+                logger.info(
+                    f"contextual_ingest_succeeded file_id={file_id} "
+                    f"doc_id={doc_id} kb_ids={kb_ids} "
+                    f"metadata_keys={[k for k, _ in user_metadata]}"
+                )
+            except Exception as exc:
+                logger.error(f"contextual_ingest_failed file_id={file_id} error={exc}")
+                try:
+                    await self._store.create(
+                        owui_file_id=file_id,
+                        filename=f"webhook:{file_id}",
+                        retriva_doc_id="",
+                        content_type="application/octet-stream",
+                        status="failed",
+                    )
+                except Exception:
+                    pass
+                result.failed += 1
+                result.errors.append(f"ctx_ingest:{file_id}:{exc}")
+                metrics.sync_errors_total.inc()
+
         return result

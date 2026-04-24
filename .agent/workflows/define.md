@@ -1,1 +1,1 @@
-# /define — Thin Adapter
+# /define — Thin Adapter User Metadata
