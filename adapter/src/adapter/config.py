@@ -17,7 +17,13 @@ class Settings(BaseSettings):
     Required:
         OWUI_BASE_URL  – Open WebUI base URL (e.g. http://openwebui:3000)
         OWUI_API_KEY   – Bearer token for the OWUI API
-        RETRIVA_BASE_URL – Retriva base URL (e.g. http://retriva:8400)
+
+    Retriva connection (with defaults):
+        RETRIVA_API_PROTOCOL      – http or https (default: http)
+        RETRIVA_INGESTION_API_HOST – host for the ingestion API (default: localhost)
+        RETRIVA_INGESTION_PORT     – port for the ingestion API (default: 8000)
+        RETRIVA_CHAT_API_HOST      – host for the chat API (default: localhost)
+        RETRIVA_CHAT_PORT          – port for the chat API (default: 8001)
 
     Optional (with defaults):
         RETRIVA_API_KEY, POLL_INTERVAL_SECONDS, DB_PATH,
@@ -40,9 +46,31 @@ class Settings(BaseSettings):
         ...,
         description="Bearer token for the Open WebUI API",
     )
-    RETRIVA_BASE_URL: str = Field(
-        ...,
-        description="Retriva base URL (e.g. http://retriva:8400)",
+
+    # --- Retriva connection --------------------------------------------------
+    RETRIVA_API_PROTOCOL: str = Field(
+        default="http",
+        description="Protocol for Retriva APIs (http or https)",
+    )
+    RETRIVA_INGESTION_API_HOST: str = Field(
+        default="localhost",
+        description="Hostname for the Retriva ingestion API",
+    )
+    RETRIVA_INGESTION_PORT: int = Field(
+        default=8000,
+        ge=1,
+        le=65535,
+        description="Port for the Retriva ingestion API",
+    )
+    RETRIVA_CHAT_API_HOST: str = Field(
+        default="localhost",
+        description="Hostname for the Retriva chat API",
+    )
+    RETRIVA_CHAT_PORT: int = Field(
+        default=8001,
+        ge=1,
+        le=65535,
+        description="Port for the Retriva chat API",
     )
 
     # --- Optional ------------------------------------------------------------
@@ -98,6 +126,24 @@ class Settings(BaseSettings):
     BACKOFF_MAX_SECONDS: float = Field(default=30.0, gt=0)
     HTTP_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0)
 
+    # --- Computed URLs -------------------------------------------------------
+
+    @property
+    def retriva_ingestion_url(self) -> str:
+        """Full base URL for the Retriva ingestion API."""
+        return (
+            f"{self.RETRIVA_API_PROTOCOL}://"
+            f"{self.RETRIVA_INGESTION_API_HOST}:{self.RETRIVA_INGESTION_PORT}"
+        )
+
+    @property
+    def retriva_chat_url(self) -> str:
+        """Full base URL for the Retriva chat API."""
+        return (
+            f"{self.RETRIVA_API_PROTOCOL}://"
+            f"{self.RETRIVA_CHAT_API_HOST}:{self.RETRIVA_CHAT_PORT}"
+        )
+
 
 def load_settings(**overrides: object) -> Settings:
     """Create a validated ``Settings`` instance.
@@ -105,3 +151,4 @@ def load_settings(**overrides: object) -> Settings:
     Keyword arguments override environment variables – useful in tests.
     """
     return Settings(**overrides)  # type: ignore[arg-type]
+

@@ -26,18 +26,13 @@ poll_duration_seconds = Histogram(
     buckets=(0.5, 1, 2, 5, 10, 30, 60, 120),
 )
 
-directives_processed_total = Counter(
-    "adapter_directives_processed_total",
-    "Total directives parsed from chat messages",
-    ["action"],
+turns_intercepted_total = Counter(
+    "adapter_turns_intercepted_total",
+    "Total turns intercepted (not forwarded to LLM)",
+    ["route"],
 )
 
-webhook_messages_total = Counter(
-    "adapter_webhook_messages_total",
-    "Total chat messages received via webhook",
-)
-
-chat_messages_observed_total = Counter(
-    "adapter_chat_messages_observed_total",
-    "Total user chat messages observed via chat polling",
+turns_forwarded_total = Counter(
+    "adapter_turns_forwarded_total",
+    "Total turns forwarded to the upstream LLM",
 )

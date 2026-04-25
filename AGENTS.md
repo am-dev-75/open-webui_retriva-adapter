@@ -1,25 +1,24 @@
-# Agent Instructions — Thin Adapter User Metadata
+# Agent Instructions — Thin Adapter UX Routing Update
 
 ## Mission
-Extend the Thin Adapter (Open WebUI → Retriva) to support **user-provided ingestion metadata**
-using chat directives combined with Knowledge Base selection.
+Update the Thin Adapter so it provides **UX-aware routing** for directive-only and upload-only turns.
 
 The adapter must:
-- parse @@ingestion_tag_start and @@ingestion_tag_stop directives from chat messages
-- maintain a per-chat ingestion metadata context
-- replace metadata on each new @@ingestion_tag_start
-- disable metadata on @@ingestion_tag_stop
-- always populate kb_ids based on selected Knowledge Bases (Pattern A)
-- send user_metadata and kb_ids to ingestion_api_v1
+- intercept directive-only messages and **not** forward them to the chat LLM
+- return an immediate synthetic acknowledgement for directives
+- intercept upload-only turns and **not** forward them to the chat LLM
+- return an immediate synthetic acknowledgement for uploads
+- only forward turns to the chat LLM when there is a **substantive user question**
 
 ## Order of authority
-1. specs/015-thin-adapter-user-metadata/spec.md
-2. specs/015-thin-adapter-user-metadata/architecture.md
-3. .agent/rules/retriva-constitution.md
-4. specs/015-thin-adapter-user-metadata/tasks.md
+1. `specs/016-thin-adapter-ux-routing/spec.md`
+2. `specs/016-thin-adapter-ux-routing/architecture.md`
+3. `.agent/rules/retriva-constitution.md`
+4. `specs/016-thin-adapter-ux-routing/tasks.md`
 
 ## Non-negotiable rules
 - Do not modify Open WebUI source code
-- Do not modify ingestion_api_v1 semantics beyond passing metadata
-- Metadata replacement semantics must be respected
-- Adapter logic must be deterministic and stateless across restarts
+- Do not forward directive-only turns to the chat LLM
+- Do not forward upload-only turns to the chat LLM
+- Synthetic acknowledgements must be OpenAI-compatible responses
+- Turns with substantive questions must still be forwarded normally

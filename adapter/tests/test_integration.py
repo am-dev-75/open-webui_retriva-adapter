@@ -32,7 +32,10 @@ def int_settings(tmp_path: Path) -> Settings:
     return Settings(
         OWUI_BASE_URL="http://owui:3000",
         OWUI_API_KEY="test-key",
-        RETRIVA_BASE_URL="http://retriva:8400",
+        RETRIVA_INGESTION_API_HOST="retriva",
+        RETRIVA_INGESTION_PORT=8000,
+        RETRIVA_CHAT_API_HOST="retriva",
+        RETRIVA_CHAT_PORT=8001,
         DB_PATH=tmp_path / "integration.db",
         POLL_INTERVAL_SECONDS=5,
     )
@@ -98,7 +101,7 @@ class TestUploadAndIngestFlow:
         )
 
         # Retriva PDF ingestion endpoint
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/upload/pdf").mock(
+        respx.post(f"{s.retriva_ingestion_url}/api/v1/ingest/upload/pdf").mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-1"},
             ),
@@ -144,13 +147,13 @@ class TestUploadAndIngestFlow:
         )
 
         # Text endpoint for .txt and .md files
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text").mock(
+        respx.post(f"{s.retriva_ingestion_url}/api/v1/ingest/text").mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-t"},
             ),
         )
         # PDF endpoint for .pdf files
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/upload/pdf").mock(
+        respx.post(f"{s.retriva_ingestion_url}/api/v1/ingest/upload/pdf").mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-p"},
             ),
@@ -195,7 +198,7 @@ class TestIdempotencyFlow:
             f"{s.OWUI_BASE_URL}/api/v1/files/file-existing/content",
         ).mock(return_value=httpx.Response(200, content=b"x"))
         ingest_route = respx.post(
-            f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{s.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(return_value=httpx.Response(202, json={"status": "accepted", "message": "ok"}))
 
         result = await int_stack["orchestrator"].run_cycle()
@@ -272,7 +275,7 @@ class TestDeleteFlow:
 
         # Retriva delete should be called
         delete_route = respx.delete(
-            f"{s.RETRIVA_BASE_URL}/api/v1/documents/doc-del-001",
+            f"{s.retriva_ingestion_url}/api/v1/documents/doc-del-001",
         ).mock(return_value=httpx.Response(200))
 
         result = await int_stack["orchestrator"].run_cycle()
@@ -301,10 +304,10 @@ class TestDeleteFlow:
             ]),
         )
 
-        respx.delete(f"{s.RETRIVA_BASE_URL}/api/v1/documents/doc-1").mock(
+        respx.delete(f"{s.retriva_ingestion_url}/api/v1/documents/doc-1").mock(
             return_value=httpx.Response(200),
         )
-        respx.delete(f"{s.RETRIVA_BASE_URL}/api/v1/documents/doc-2").mock(
+        respx.delete(f"{s.retriva_ingestion_url}/api/v1/documents/doc-2").mock(
             return_value=httpx.Response(200),
         )
 
@@ -330,7 +333,7 @@ class TestDeleteFlow:
 
         # Retriva delete fails
         respx.delete(
-            f"{s.RETRIVA_BASE_URL}/api/v1/documents/doc-stubborn",
+            f"{s.retriva_ingestion_url}/api/v1/documents/doc-stubborn",
         ).mock(return_value=httpx.Response(500))
 
         result = await int_stack["orchestrator"].run_cycle()
@@ -382,7 +385,7 @@ class TestRetryFlow:
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-retry"},
             )
 
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text").mock(
+        respx.post(f"{s.retriva_ingestion_url}/api/v1/ingest/text").mock(
             side_effect=ingest_handler,
         )
 
@@ -435,7 +438,7 @@ class TestFullLifecycleFlow:
         respx.get(
             f"{s.OWUI_BASE_URL}/api/v1/files/f-lifecycle/content",
         ).mock(return_value=httpx.Response(200, content=b"lifecycle data"))
-        respx.post(f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text").mock(
+        respx.post(f"{s.retriva_ingestion_url}/api/v1/ingest/text").mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-lc"},
             ),
@@ -462,7 +465,7 @@ class TestFullLifecycleFlow:
             return_value=httpx.Response(200, json=[]),
         )
         delete_route = respx.delete(
-            f"{s.RETRIVA_BASE_URL}/api/v1/documents/owui:f-lifecycle",
+            f"{s.retriva_ingestion_url}/api/v1/documents/owui:f-lifecycle",
         ).mock(return_value=httpx.Response(200))
 
         r3 = await int_stack["orchestrator"].run_cycle()
