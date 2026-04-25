@@ -25,3 +25,14 @@ poll_duration_seconds = Histogram(
     "Duration of a single poll-and-sync cycle in seconds",
     buckets=(0.5, 1, 2, 5, 10, 30, 60, 120),
 )
+
+turns_intercepted_total = Counter(
+    "adapter_turns_intercepted_total",
+    "Total turns intercepted (not forwarded to LLM)",
+    ["route"],
+)
+
+turns_forwarded_total = Counter(
+    "adapter_turns_forwarded_total",
+    "Total turns forwarded to the upstream LLM",
+)

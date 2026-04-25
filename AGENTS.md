@@ -1,24 +1,24 @@
-# Agent Instructions — Thin Adapter (Pattern B-1)
+# Agent Instructions — Thin Adapter UX Routing Update
 
 ## Mission
-Implement **Pattern B-1 — Thin Adapter** to mirror file uploads from **Open WebUI** into **Retriva** without modifying Open WebUI.
+Update the Thin Adapter so it provides **UX-aware routing** for directive-only and upload-only turns.
 
-The adapter:
-- is written in **Python**
-- observes Open WebUI file lifecycle events
-- forwards uploaded files to Retriva ingestion APIs
-- keeps file ↔ document mappings
-- is designed to be containerized once stable
+The adapter must:
+- intercept directive-only messages and **not** forward them to the chat LLM
+- return an immediate synthetic acknowledgement for directives
+- intercept upload-only turns and **not** forward them to the chat LLM
+- return an immediate synthetic acknowledgement for uploads
+- only forward turns to the chat LLM when there is a **substantive user question**
 
 ## Order of authority
-1. `specs/012-thin-adapter-openwebui-retriva/spec.md`
-2. `specs/012-thin-adapter-openwebui-retriva/architecture.md`
+1. `specs/016-thin-adapter-ux-routing/spec.md`
+2. `specs/016-thin-adapter-ux-routing/architecture.md`
 3. `.agent/rules/retriva-constitution.md`
-4. `specs/012-thin-adapter-openwebui-retriva/tasks.md`
+4. `specs/016-thin-adapter-ux-routing/tasks.md`
 
 ## Non-negotiable rules
 - Do not modify Open WebUI source code
-- Do not modify Retriva core semantics
-- The adapter must be stateless except for durable mappings
-- Open WebUI native RAG must be disabled at query time
-- The adapter must be replaceable without downtime
+- Do not forward directive-only turns to the chat LLM
+- Do not forward upload-only turns to the chat LLM
+- Synthetic acknowledgements must be OpenAI-compatible responses
+- Turns with substantive questions must still be forwarded normally

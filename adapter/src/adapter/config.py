@@ -49,6 +49,16 @@ class Settings(BaseSettings):
         default="",
         description="Optional Retriva auth token",
     )
+    LLM_UPSTREAM_URL: str = Field(
+        default="",
+        description="Base URL of the upstream LLM API for proxied requests "
+        "(e.g. http://ollama:11434/v1). Required for chat completions proxy.",
+    )
+    LLM_API_KEY: str = Field(
+        default="",
+        description="Service credential (Bearer token) for the upstream LLM API. "
+        "Separate from inbound auth — the adapter enforces least privilege.",
+    )
     POLL_INTERVAL_SECONDS: int = Field(
         default=30,
         ge=5,
