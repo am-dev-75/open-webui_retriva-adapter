@@ -1,0 +1,11 @@
+{
+    "configurations": [
+        {
+            "name": "Python Debugger: Module adapter",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "adapter",
+            "console": "integratedTerminal"
+        }
+    ]
+}
