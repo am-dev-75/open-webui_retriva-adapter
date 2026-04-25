@@ -18,11 +18,9 @@ def _make_classification(
     directive = DirectiveResult(action=directive_action, metadata=metadata or {})
     return TurnClassification(
         has_directive=directive_action != "none",
-        has_files=bool(filenames),
         has_substantive_question=False,
         directive_result=directive,
         stripped_content="",
-        filenames=filenames or [],
         route=route,
     )
 
@@ -60,13 +58,13 @@ class TestContent:
         assert "🛑" in txt
 
     def test_upload_ack_content(self) -> None:
-        txt = build_response(_make_classification("upload_ack", filenames=["r.pdf"]))["choices"][0]["message"]["content"]
-        assert "r.pdf" in txt and "📄" in txt
+        txt = build_response(_make_classification("upload_ack"))["choices"][0]["message"]["content"]
+        assert "✅ Document received" in txt
 
     def test_combined_content(self) -> None:
-        c = _make_classification("directive_plus_upload_ack", directive_action="tag_start", metadata={"p": "X"}, filenames=["s.pdf"])
+        c = _make_classification("directive_plus_upload_ack", directive_action="tag_start", metadata={"p": "X"})
         txt = build_response(c)["choices"][0]["message"]["content"]
-        assert "✅" in txt and "📄" in txt and "s.pdf" in txt
+        assert "✅ Document received" in txt and "X" in txt
 
 
 class TestUniqueIds:

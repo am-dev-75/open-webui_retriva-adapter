@@ -23,7 +23,7 @@ class TestRetrivaClientRouting:
         self, settings: Settings,
     ) -> None:
         route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{settings.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-1"},
@@ -51,7 +51,7 @@ class TestRetrivaClientRouting:
         self, settings: Settings,
     ) -> None:
         route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/html",
+            f"{settings.retriva_ingestion_url}/api/v1/ingest/html",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-2"},
@@ -88,7 +88,7 @@ class TestRetrivaClientRouting:
     ) -> None:
         """Content-Type with charset parameter should still route correctly."""
         route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{settings.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok"},
@@ -116,7 +116,7 @@ class TestRetrivaClientPdf:
     ) -> None:
         """PDFs should be forwarded natively via multipart."""
         route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/pdf",
+            f"{settings.retriva_ingestion_url}/api/v1/ingest/upload/pdf",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-pdf"},
@@ -144,7 +144,7 @@ class TestRetrivaClientPdf:
     ) -> None:
         """HTTP errors from Retriva should propagate."""
         respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/pdf",
+            f"{settings.retriva_ingestion_url}/api/v1/ingest/upload/pdf",
         ).mock(
             return_value=httpx.Response(500, json={"detail": "internal error"}),
         )
@@ -166,7 +166,7 @@ class TestRetrivaClientDeleteHealth:
 
     @respx.mock
     async def test_delete_success(self, settings: Settings) -> None:
-        respx.delete(f"{settings.RETRIVA_BASE_URL}/api/v1/documents/d-1").mock(
+        respx.delete(f"{settings.retriva_ingestion_url}/api/v1/documents/d-1").mock(
             return_value=httpx.Response(200),
         )
         async with httpx.AsyncClient() as client:
@@ -175,7 +175,7 @@ class TestRetrivaClientDeleteHealth:
 
     @respx.mock
     async def test_health_ok(self, settings: Settings) -> None:
-        respx.get(f"{settings.RETRIVA_BASE_URL}/healthz").mock(
+        respx.get(f"{settings.retriva_ingestion_url}/healthz").mock(
             return_value=httpx.Response(200),
         )
         async with httpx.AsyncClient() as client:
@@ -184,7 +184,7 @@ class TestRetrivaClientDeleteHealth:
 
     @respx.mock
     async def test_health_down(self, settings: Settings) -> None:
-        respx.get(f"{settings.RETRIVA_BASE_URL}/healthz").mock(
+        respx.get(f"{settings.retriva_ingestion_url}/healthz").mock(
             side_effect=httpx.ConnectError("refused"),
         )
         async with httpx.AsyncClient() as client:

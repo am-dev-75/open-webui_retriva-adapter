@@ -18,7 +18,11 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         OWUI_BASE_URL="http://test-owui:3000",
         OWUI_API_KEY="test-key-owui",
-        RETRIVA_BASE_URL="http://test-retriva:8400",
+        RETRIVA_API_PROTOCOL="http",
+        RETRIVA_INGESTION_API_HOST="test-retriva",
+        RETRIVA_INGESTION_PORT=8000,
+        RETRIVA_CHAT_API_HOST="test-retriva",
+        RETRIVA_CHAT_PORT=8001,
         RETRIVA_API_KEY="test-key-retriva",
         DB_PATH=tmp_path / "test.db",
         POLL_INTERVAL_SECONDS=5,

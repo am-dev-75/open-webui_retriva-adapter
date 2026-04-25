@@ -14,7 +14,10 @@ def _set_env(tmp_path, monkeypatch):
     """Set required env vars before importing the app."""
     monkeypatch.setenv("OWUI_BASE_URL", "http://owui-test:3000")
     monkeypatch.setenv("OWUI_API_KEY", "test-key")
-    monkeypatch.setenv("RETRIVA_BASE_URL", "http://retriva-test:8400")
+    monkeypatch.setenv("RETRIVA_INGESTION_API_HOST", "retriva-test")
+    monkeypatch.setenv("RETRIVA_INGESTION_PORT", "8000")
+    monkeypatch.setenv("RETRIVA_CHAT_API_HOST", "retriva-test")
+    monkeypatch.setenv("RETRIVA_CHAT_PORT", "8001")
     monkeypatch.setenv("DB_PATH", str(tmp_path / "api_test.db"))
     monkeypatch.setenv("POLL_INTERVAL_SECONDS", "9999")  # don't auto-poll
 

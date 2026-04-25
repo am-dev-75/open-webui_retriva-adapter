@@ -9,93 +9,61 @@ from adapter.turn_classifier import classify
 def _make_body(
     content: str = "",
     *,
-    files: list | None = None,
     role: str = "user",
 ) -> dict:
     """Build a minimal chat completion request body."""
-    body: dict = {
+    return {
         "model": "test-model",
         "messages": [{"role": role, "content": content}],
     }
-    if files is not None:
-        body["files"] = files
-    return body
 
 
 class TestDirectiveOnlyRouting:
-    """Directive-only turns → directive_ack / directive_stop_ack."""
+    """Directive-only turns with no question → directive_plus_upload_ack OR directive_ack.
+    Wait, tag_start with NO question results in directive_plus_upload_ack because context becomes active."""
 
     def test_tag_start_only(self) -> None:
         body = _make_body("@@ingestion_tag_start\nproject: Apollo")
         result = classify(body)
-        assert result.route == "directive_ack"
+        # Because it starts ingestion, and there's no question, it's considered upload-only
+        assert result.route == "directive_plus_upload_ack"
         assert result.has_directive is True
-        assert result.has_files is False
         assert result.has_substantive_question is False
-
-    def test_tag_start_no_metadata(self) -> None:
-        body = _make_body("@@ingestion_tag_start")
-        result = classify(body)
-        assert result.route == "directive_ack"
 
     def test_tag_stop_only(self) -> None:
         body = _make_body("@@ingestion_tag_stop")
-        result = classify(body)
+        result = classify(body, is_ingestion_active=True)
+        # Stops ingestion, no question -> directive_stop_ack
         assert result.route == "directive_stop_ack"
         assert result.has_directive is True
-        assert result.has_files is False
         assert result.has_substantive_question is False
-
-    def test_tag_start_case_insensitive(self) -> None:
-        body = _make_body("@@INGESTION_TAG_START\nteam: Alpha")
-        result = classify(body)
-        assert result.route == "directive_ack"
 
 
 class TestUploadOnlyRouting:
-    """Upload-only turns → upload_ack."""
+    """Upload-only turns → upload_ack (empty/trivial text + active context)."""
 
-    def test_files_no_text(self) -> None:
-        body = _make_body("", files=[{"filename": "report.pdf"}])
-        result = classify(body)
+    def test_empty_text_active_context(self) -> None:
+        body = _make_body("")
+        result = classify(body, is_ingestion_active=True)
         assert result.route == "upload_ack"
-        assert result.has_files is True
         assert result.has_directive is False
         assert result.has_substantive_question is False
-        assert result.filenames == ["report.pdf"]
 
-    def test_files_with_trivial_text(self) -> None:
-        """Short non-alphabetic text is not a substantive question."""
-        body = _make_body("...", files=[{"filename": "data.csv"}])
-        result = classify(body)
+    def test_trivial_text_active_context(self) -> None:
+        body = _make_body("...")
+        result = classify(body, is_ingestion_active=True)
         assert result.route == "upload_ack"
 
-    def test_multiple_files(self) -> None:
-        body = _make_body(
-            "",
-            files=[
-                {"filename": "a.pdf"},
-                {"filename": "b.txt"},
-                {"name": "c.md"},
-            ],
-        )
-        result = classify(body)
+    def test_placeholder_text_active_context(self) -> None:
+        body = _make_body("Here is the document")
+        result = classify(body, is_ingestion_active=True)
         assert result.route == "upload_ack"
-        assert len(result.filenames) == 3
+        assert result.has_substantive_question is False
 
-
-class TestCombinedDirectiveUploadRouting:
-    """Directive + files, no question → directive_plus_upload_ack."""
-
-    def test_directive_plus_files(self) -> None:
-        body = _make_body(
-            "@@ingestion_tag_start\nproject: Beta",
-            files=[{"filename": "spec.pdf"}],
-        )
-        result = classify(body)
-        assert result.route == "directive_plus_upload_ack"
-        assert result.has_directive is True
-        assert result.has_files is True
+    def test_json_placeholder_active_context(self) -> None:
+        body = _make_body('{"file_id": "123", "name": "doc.pdf"}')
+        result = classify(body, is_ingestion_active=True)
+        assert result.route == "upload_ack"
         assert result.has_substantive_question is False
 
 
@@ -117,35 +85,20 @@ class TestForwardRouting:
         assert result.has_directive is True
         assert result.has_substantive_question is True
 
-    def test_files_plus_question(self) -> None:
-        body = _make_body(
-            "Please summarise this document",
-            files=[{"filename": "report.pdf"}],
-        )
-        result = classify(body)
+    def test_question_with_active_context(self) -> None:
+        body = _make_body("Please summarise this document")
+        result = classify(body, is_ingestion_active=True)
         assert result.route == "forward"
-        assert result.has_files is True
-        assert result.has_substantive_question is True
-
-    def test_all_three_signals(self) -> None:
-        body = _make_body(
-            "@@ingestion_tag_start\nproject: Z\n\nWhat is the key finding here?",
-            files=[{"filename": "findings.pdf"}],
-        )
-        result = classify(body)
-        assert result.route == "forward"
-        assert result.has_directive is True
-        assert result.has_files is True
         assert result.has_substantive_question is True
 
 
 class TestEdgeCases:
     """Edge cases for turn classification."""
 
-    def test_empty_message(self) -> None:
+    def test_empty_message_inactive_context(self) -> None:
         body = _make_body("")
-        result = classify(body)
-        assert result.route == "forward"  # nothing to intercept
+        result = classify(body, is_ingestion_active=False)
+        assert result.route == "upload_ack"  # completely empty -> intercepted
 
     def test_no_user_message(self) -> None:
         body = {
@@ -159,13 +112,6 @@ class TestEdgeCases:
         body = {"model": "test", "messages": []}
         result = classify(body)
         assert result.route == "forward"
-
-    def test_files_as_string_ids(self) -> None:
-        """Files specified as string IDs should still be detected."""
-        body = _make_body("", files=["file-abc-123"])
-        result = classify(body)
-        assert result.route == "upload_ack"
-        assert result.filenames == ["file-abc-123"]
 
     def test_stripped_content_excludes_directives(self) -> None:
         body = _make_body("@@ingestion_tag_start\nproject: X\n\nTell me about the data")

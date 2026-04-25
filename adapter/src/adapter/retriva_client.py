@@ -35,7 +35,7 @@ class RetrivaClient:
     """HTTP client for Retriva ingestion and document management."""
 
     def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
-        self._base_url = settings.RETRIVA_BASE_URL.rstrip("/")
+        self._base_url = settings.retriva_ingestion_url
         self._api_key = settings.RETRIVA_API_KEY
         self._client = client
 

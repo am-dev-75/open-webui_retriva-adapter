@@ -49,23 +49,13 @@ def _build_content(classification: TurnClassification) -> str:
         return "🛑 Ingestion tagging deactivated."
 
     if route == "upload_ack":
-        file_block = ""
-        if classification.filenames:
-            file_block = f"\n{_format_filenames(classification.filenames)}"
-        return f"📄 File(s) received for ingestion:{file_block}\n\nProcessing will begin shortly."
+        return "✅ Document received and queued for ingestion."
 
     if route == "directive_plus_upload_ack":
         meta_block = ""
         if directive and directive.metadata:
             meta_block = f"\n\n**Active metadata:**\n{_format_metadata(directive.metadata)}"
-        file_block = ""
-        if classification.filenames:
-            file_block = f"\n{_format_filenames(classification.filenames)}"
-        return (
-            f"✅ Ingestion tagging activated.{meta_block}\n\n"
-            f"📄 File(s) received for ingestion:{file_block}\n\n"
-            f"Processing will begin shortly."
-        )
+        return f"✅ Document received and queued for ingestion.{meta_block}"
 
     # Should not be called for "forward" route, but handle gracefully
     return ""

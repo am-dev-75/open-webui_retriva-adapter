@@ -66,15 +66,15 @@ def _apply_directive_if_needed(
         _ingestion_ctx.apply_directive(chat_id, classification.directive_result)
 
 
-def _upstream_headers() -> dict[str, str]:
-    """Build outbound headers for the upstream LLM proxy.
+def _retriva_headers() -> dict[str, str]:
+    """Build outbound headers for Retriva service-to-service calls.
 
-    Uses the dedicated ``LLM_API_KEY`` service credential — never the
-    inbound Authorization header (anti-corruption layer).
+    Uses ``RETRIVA_API_KEY`` — never the inbound Authorization header.
+    The adapter terminates inbound user/UI auth at the boundary.
     """
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if _settings and _settings.LLM_API_KEY:
-        headers["Authorization"] = f"Bearer {_settings.LLM_API_KEY}"
+    if _settings and _settings.RETRIVA_API_KEY:
+        headers["Authorization"] = f"Bearer {_settings.RETRIVA_API_KEY}"
     return headers
 
 
@@ -177,8 +177,31 @@ async def readyz() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Chat completions proxy (UX-aware routing — SDD 016)
+# OpenAI-compatible proxy endpoints (Retriva chat API)
 # ---------------------------------------------------------------------------
+
+@app.get("/v1/models")
+async def list_models() -> JSONResponse:
+    """Proxy the OpenAI-compatible model list from Retriva's chat API."""
+    if not _settings or not _http_client:
+        return JSONResponse(
+            content={"object": "list", "data": []},
+            status_code=503,
+        )
+
+    retriva_url = f"{_settings.retriva_chat_url}/v1/models"
+    try:
+        resp = await _http_client.get(
+            retriva_url,
+            headers=_retriva_headers(),
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.HTTPError as exc:
+        logger.error(f"retriva_models_proxy_error error={exc}")
+        return JSONResponse(
+            content={"object": "list", "data": []},
+            status_code=502,
+        )
 
 @app.post("/v1/chat/completions", response_model=None)
 async def chat_completions(request: Request) -> JSONResponse | StreamingResponse:
@@ -186,12 +209,22 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
 
     Classifies each turn and either:
     - Returns a synthetic acknowledgement for directive/upload turns
-    - Proxies the request to the upstream LLM for substantive questions
+    - Forwards the request to Retriva for substantive questions
+
+    The adapter never calls the LLM directly.  Retriva owns the LLM
+    credentials and handles RAG retrieval + completion.
     """
     body: dict[str, Any] = await request.json()
 
+    logger.debug(f"### Chat request received. body={body}")
+
     # Classify the turn
-    classification = classify(body)
+    chat_id = body.get("chat_id", body.get("session_id", "default"))
+    is_ingestion_active = False
+    if _ingestion_ctx:
+        is_ingestion_active = _ingestion_ctx.is_active(chat_id)
+
+    classification = classify(body, is_ingestion_active=is_ingestion_active)
     route = classification.route
 
     # Apply directive to ingestion context once, before branching
@@ -203,28 +236,7 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
         metrics.turns_intercepted_total.labels(route=route).inc()
         return JSONResponse(content=synthetic)
 
-    # --- Forward route: proxy to upstream LLM ---
-    if not _settings or not _settings.LLM_UPSTREAM_URL:
-        logger.warning("turn_forward_skipped reason=no_LLM_UPSTREAM_URL")
-        return JSONResponse(
-            content={
-                "id": "chatcmpl-adapter-no-upstream",
-                "object": "chat.completion",
-                "created": 0,
-                "model": "retriva-adapter",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "⚠️ No upstream LLM configured. "
-                        "Please set LLM_UPSTREAM_URL.",
-                    },
-                    "finish_reason": "stop",
-                }],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            },
-        )
-
+    # --- Forward route: proxy to Retriva ---
     # Strip directives from the user message before forwarding
     if classification.has_directive and classification.stripped_content:
         messages = body.get("messages", [])
@@ -233,19 +245,19 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
                 msg["content"] = classification.stripped_content
                 break
 
-    # Proxy to upstream
-    upstream_url = f"{_settings.LLM_UPSTREAM_URL.rstrip('/')}/chat/completions"
+    retriva_url = (
+        f"{_settings.retriva_chat_url}/v1/chat/completions"  # type: ignore[union-attr]
+    )
     is_streaming = body.get("stream", False)
 
     try:
         if is_streaming:
-            # Stream the response through
             upstream_resp = await _http_client.send(  # type: ignore[union-attr]
                 _http_client.build_request(  # type: ignore[union-attr]
                     "POST",
-                    upstream_url,
+                    retriva_url,
                     json=body,
-                    headers=_upstream_headers(),
+                    headers=_retriva_headers(),
                 ),
                 stream=True,
             )
@@ -261,21 +273,30 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
             return StreamingResponse(
                 _stream_generator(),
                 status_code=upstream_resp.status_code,
-                media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
+                media_type=upstream_resp.headers.get(
+                    "content-type", "text/event-stream",
+                ),
             )
         else:
             resp = await _http_client.post(  # type: ignore[union-attr]
-                upstream_url,
+                retriva_url,
                 json=body,
-                headers=_upstream_headers(),
+                headers=_retriva_headers(),
             )
             metrics.turns_forwarded_total.inc()
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+            return JSONResponse(
+                content=resp.json(), status_code=resp.status_code,
+            )
 
     except httpx.HTTPError as exc:
-        logger.error(f"upstream_proxy_error error={exc}")
+        logger.error(f"retriva_proxy_error error={exc}")
         return JSONResponse(
-            content={"error": {"message": f"Upstream LLM error: {exc}", "type": "proxy_error"}},
+            content={
+                "error": {
+                    "message": f"Retriva proxy error: {exc}",
+                    "type": "proxy_error",
+                },
+            },
             status_code=502,
         )
 
