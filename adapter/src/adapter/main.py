@@ -303,9 +303,9 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
                     retriva_url,
                     json=body,
                     headers=_retriva_headers(),
+                    timeout=None,  # Allow slow RAG generation/retrieval
                 ),
                 stream=True,
-                timeout=None,  # Allow slow RAG generation/retrieval
             )
 
             if upstream_resp.status_code != 200:
@@ -341,6 +341,7 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
                 retriva_url,
                 json=body,
                 headers=_retriva_headers(),
+                timeout=None,  # Allow slow RAG generation/retrieval
             )
             metrics.turns_forwarded_total.inc()
             return JSONResponse(
