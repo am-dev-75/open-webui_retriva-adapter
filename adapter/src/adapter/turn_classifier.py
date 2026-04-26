@@ -95,10 +95,15 @@ def _has_substantive_text(text: str) -> bool:
     return len(alpha_only) >= _MIN_ALPHA_CHARS
 
 
-def is_human_authored_text(text: str) -> bool:
-    """Check if the text is human-authored (not an OWUI control prompt)."""
+def is_control_prompt(text: str) -> bool:
+    """Check if the text is EXCLUSIVELY an OWUI control prompt."""
     if not text or not text.strip():
         return False
+    
+    # If the text contains a directive, it's NOT a control prompt (it's user intent)
+    if "@@ingestion_tag_" in text:
+        return False
+
     OWUI_MARKERS = [
         "### Task:",
         "### Guidelines:",
@@ -106,13 +111,26 @@ def is_human_authored_text(text: str) -> bool:
         "Analyze the chat history",
         "Strictly return in JSON format",
         "<chat_history>",
-        "Today's date is:"
     ]
-    return not any(marker in text for marker in OWUI_MARKERS)
+    # We excluded "Today's date is" from markers because it often prepends human text
+    
+    # If it starts with a marker and is relatively short, or contains multiple markers,
+    # it's likely a control prompt.
+    matches = [marker for marker in OWUI_MARKERS if marker in text]
+    if len(matches) >= 2:
+        return True
+    
+    if any(text.strip().startswith(marker) for marker in OWUI_MARKERS):
+        # If it starts with a marker, it's a control prompt unless it's very long
+        # (which might mean it's mixed). 
+        # But usually control prompts are the whole message.
+        return len(text.strip()) < 500
+        
+    return False
 
 
-def _extract_all_human_user_texts(messages: list[dict[str, Any]]) -> list[str]:
-    """Extract all human-authored user messages from the turn."""
+def _extract_all_user_texts(messages: list[dict[str, Any]]) -> list[str]:
+    """Extract all user messages from the turn."""
     user_texts = []
     for msg in messages:
         if msg.get("role") == "user":
@@ -123,7 +141,7 @@ def _extract_all_human_user_texts(messages: list[dict[str, Any]]) -> list[str]:
             else:
                 content_str = str(content)
             
-            if is_human_authored_text(content_str):
+            if content_str.strip():
                 user_texts.append(content_str)
     return user_texts
 
@@ -144,12 +162,12 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
         Contains the routing decision and extracted metadata.
     """
     messages = request_body.get("messages", [])
-    user_texts = _extract_all_human_user_texts(messages)
+    user_texts = _extract_all_user_texts(messages)
     
-    # Use the last human-authored text for directive parsing
+    # 1. Use the last user text for directive parsing
     user_content = user_texts[-1] if user_texts else ""
 
-    # 1. Parse directives
+    # 2. Parse directives
     directive_result = parse_directive(user_content)
     has_directive = directive_result.action != "none"
 
@@ -162,34 +180,43 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
 
     stripped = _strip_directives(user_content)
     
-    # 2. Check if there is a real human question
+    # 3. Check if there is a real human question
     has_real_question = False
     if user_texts:
-        stripped_clean = stripped.strip()
-        is_non_question = False
-        if not stripped_clean:
-            is_non_question = True
-        elif stripped_clean.startswith("{") and stripped_clean.endswith("}"):
-            is_non_question = True
-        elif stripped_clean.startswith("[") and stripped_clean.endswith("]"):
-            is_non_question = True
-        elif not _has_explicit_intent(stripped_clean):
-            is_non_question = True
-            
-        if not is_non_question and _has_substantive_text(stripped):
-            has_real_question = True
+        # Check if the text is a control prompt
+        if any(is_control_prompt(ut) for ut in user_texts):
+            has_real_question = False
+        else:
+            stripped_clean = stripped.strip()
+            is_non_question = False
+            if not stripped_clean:
+                is_non_question = True
+            elif stripped_clean.startswith("{") and stripped_clean.endswith("}"):
+                is_non_question = True
+            elif stripped_clean.startswith("[") and stripped_clean.endswith("]"):
+                is_non_question = True
+            elif not _has_explicit_intent(stripped_clean):
+                is_non_question = True
+                
+            if not is_non_question and _has_substantive_text(stripped):
+                has_real_question = True
 
     has_user_role = any(msg.get("role") == "user" for msg in messages)
 
-    # 3. Redefined upload-only classification
+    # 4. Redefined upload-only classification
     if not has_user_role:
         is_upload_only = False
     elif not user_texts:
         # Purely synthetic or completely empty user turn must be intercepted
         is_upload_only = True
     else:
-        # Has human text, but if it lacks a real question, it's upload-only IF context is active
-        is_upload_only = not has_real_question and context_will_be_active
+        # Has user text, but if it lacks a real question, it's upload-only IF context is active
+        # BUT only if it's NOT a control prompt
+        contains_control = any(is_control_prompt(ut) for ut in user_texts)
+        if contains_control:
+            is_upload_only = False
+        else:
+            is_upload_only = not has_real_question and context_will_be_active
 
     has_substantive_question = has_real_question
 

@@ -272,7 +272,17 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
         return JSONResponse(content=synthetic)
 
     # --- Forward route: proxy to Retriva ---
-    # Strip directives from the user message before forwarding
+    # 1. Extract retrieval parameters from OWUI-provided body
+    retrieval_params = {}
+    for key in ["top_k", "top_p", "temperature"]:
+        if key in body:
+            retrieval_params[key] = body.pop(key)
+
+    if retrieval_params:
+        body["retrieval"] = retrieval_params
+        logger.debug(f"retrieval_parameters_forwarded params={retrieval_params}")
+
+    # 2. Strip directives from the user message before forwarding
     if classification.has_directive and classification.stripped_content:
         messages = body.get("messages", [])
         for msg in reversed(messages):
@@ -295,12 +305,26 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
                     headers=_retriva_headers(),
                 ),
                 stream=True,
+                timeout=None,  # Allow slow RAG generation/retrieval
             )
+
+            if upstream_resp.status_code != 200:
+                # Error response: consume and return as JSON
+                try:
+                    error_data = await upstream_resp.json()
+                except Exception:
+                    raw_body = await upstream_resp.aread()
+                    error_data = {"error": raw_body.decode("utf-8", errors="replace")}
+                finally:
+                    await upstream_resp.aclose()
+                return JSONResponse(content=error_data, status_code=upstream_resp.status_code)
 
             async def _stream_generator():
                 try:
                     async for chunk in upstream_resp.aiter_bytes():
                         yield chunk
+                except (httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+                    logger.error(f"retriva_chat_stream_error error={exc}")
                 finally:
                     await upstream_resp.aclose()
 
