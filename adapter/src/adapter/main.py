@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from prometheus_client import generate_latest
 
@@ -23,6 +24,7 @@ from adapter.logger import setup_logging, get_logger
 from adapter.mapping_store import MappingStore
 from adapter.models import ChatMessagePayload, SyncResult
 from adapter.observer import FileObserver
+from adapter.chat_observer import ChatObserver
 from adapter.orchestrator import SyncOrchestrator
 from adapter.retriva_client import RetrivaClient
 from adapter.synthetic_response import build_response
@@ -39,6 +41,7 @@ _orchestrator: SyncOrchestrator | None = None
 _scheduler: AsyncIOScheduler | None = None
 _http_client: httpx.AsyncClient | None = None
 _ingestion_ctx: IngestionContext | None = None
+_chat_observer: ChatObserver | None = None
 _sync_lock = asyncio.Lock()
 
 
@@ -47,6 +50,11 @@ async def _run_scheduled_sync() -> None:
     async with _sync_lock:
         if _orchestrator:
             await _orchestrator.run_cycle()
+
+async def _run_chat_poll() -> None:
+    """Called by APScheduler on each chat-poll interval tick."""
+    if _chat_observer and _ingestion_ctx:
+        await _chat_observer.poll_for_directives(_ingestion_ctx)
 
 
 def _apply_directive_if_needed(
@@ -392,6 +400,12 @@ async def receive_chat_message(payload: ChatMessagePayload) -> dict[str, Any]:
     # 1. Update KB IDs (always, independent of directives)
     if payload.kb_ids:
         _ingestion_ctx.set_kb_ids(payload.chat_id, payload.kb_ids)
+        if _store:
+            for kb_id in payload.kb_ids:
+                try:
+                    await _store.upsert_kb_mapping(kb_id)
+                except Exception as e:
+                    logger.error(f"failed to upsert kb_mapping kb_id={kb_id} err={e}")
 
     # 2. Parse directive from message
     directive = parse_directive(payload.message)
@@ -461,3 +475,40 @@ def _register_debug_endpoints(target_app: FastAPI) -> None:
                 "last_updated": None,
             }
         return info
+
+    @target_app.get("/internal/mappings/documents")
+    async def list_document_mappings() -> list[dict[str, Any]]:
+        """List all document mappings."""
+        if not _store:
+            return []
+        
+        records = await _store.list_all()
+        return [dataclasses.asdict(r) for r in records]
+
+    @target_app.get("/internal/mappings/documents/{owui_file_id}")
+    async def get_document_mapping(owui_file_id: str) -> dict[str, Any]:
+        """Get a specific document mapping by OWUI file ID."""
+        if not _store:
+            raise HTTPException(status_code=404, detail="Store not initialized")
+            
+        record = await _store.get_by_file_id(owui_file_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Mapping not found")
+            
+        return dataclasses.asdict(record)
+
+    @target_app.get("/internal/mappings/knowledge-bases")
+    async def get_kb_mappings() -> list[dict[str, Any]]:
+        """Return all observed Knowledge Base mappings."""
+        if not _store:
+            return []
+            
+        records = await _store.list_kb_mappings()
+        return [
+            {
+                "owui_kb_id": r.owui_kb_id,
+                "retriva_kb_id": r.retriva_kb_id,
+                "last_seen_at": r.last_seen_at
+            }
+            for r in records
+        ]

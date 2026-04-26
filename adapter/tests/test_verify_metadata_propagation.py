@@ -93,7 +93,8 @@ def v_settings(tmp_path: Path) -> Settings:
     return Settings(
         OWUI_BASE_URL="http://owui:3000",
         OWUI_API_KEY="test-key",
-        RETRIVA_BASE_URL="http://retriva:8400",
+        RETRIVA_INGESTION_API_HOST="retriva",
+        RETRIVA_INGESTION_PORT=8400,
         DB_PATH=tmp_path / "verify.db",
         POLL_INTERVAL_SECONDS=5,
         DEFAULT_KB_ID="kb-default",
@@ -153,7 +154,7 @@ class TestScenarioA_NoTagging:
     async def test_file_ingested_without_user_metadata(self, v_stack: dict) -> None:
         s = v_stack["s"]
         _mock_download(s.OWUI_BASE_URL, "f-a1")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await v_stack["orch"].ingest_with_context(["f-a1"], "chat-a")
 
@@ -192,7 +193,7 @@ class TestScenarioB_TaggingActive:
         ))
 
         _mock_download(s.OWUI_BASE_URL, "f-b1")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await v_stack["orch"].ingest_with_context(["f-b1"], "chat-b")
 
@@ -232,7 +233,7 @@ class TestScenarioC_MetadataReplacement:
         ))
 
         _mock_download(s.OWUI_BASE_URL, "f-c1")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await v_stack["orch"].ingest_with_context(["f-c1"], "chat-c")
 
@@ -276,7 +277,7 @@ class TestScenarioD_TagStop:
         assert ctx.get_kb_ids("chat-d") == ["kb-ops"]  # persisted!
 
         _mock_download(s.OWUI_BASE_URL, "f-d1")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await v_stack["orch"].ingest_with_context(["f-d1"], "chat-d")
 
@@ -309,7 +310,7 @@ class TestScenarioE_DefaultKBFallback:
         ))
 
         _mock_download(s.OWUI_BASE_URL, "f-e1")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await v_stack["orch"].ingest_with_context(["f-e1"], "chat-e")
 
@@ -345,7 +346,7 @@ class TestScenarioF_MultipleFiles:
         for fid in ["f-f1", "f-f2", "f-f3"]:
             _mock_download(s.OWUI_BASE_URL, fid, content=f"content-{fid}".encode())
 
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await v_stack["orch"].ingest_with_context(
             ["f-f1", "f-f2", "f-f3"], "chat-f",
@@ -389,7 +390,7 @@ class TestScenarioG_ChatIsolation:
 
         _mock_download(s.OWUI_BASE_URL, "f-g1")
         _mock_download(s.OWUI_BASE_URL, "f-g2")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         # Ingest from chat 1
         r1 = await v_stack["orch"].ingest_with_context(["f-g1"], "chat-g1")
@@ -442,7 +443,7 @@ priority: high"""
 
         # Step 3: Ingest a file
         _mock_download(s.OWUI_BASE_URL, "f-h1")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await v_stack["orch"].ingest_with_context(["f-h1"], "chat-h")
         assert result.ingested == 1

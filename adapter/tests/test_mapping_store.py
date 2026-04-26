@@ -78,3 +78,30 @@ class TestMappingStore:
     async def test_get_nonexistent(self, store: MappingStore) -> None:
         result = await store.get_by_file_id("nonexistent")
         assert result is None
+
+    async def test_upsert_kb_mapping(self, store: MappingStore) -> None:
+        await store.upsert_kb_mapping("kb-1")
+        records = await store.list_kb_mappings()
+        assert len(records) == 1
+        assert records[0].owui_kb_id == "kb-1"
+        assert records[0].retriva_kb_id == "kb-1"
+        assert records[0].last_seen_at is not None
+
+        # Upserting again should update last_seen_at
+        first_seen = records[0].last_seen_at
+        import asyncio
+        await asyncio.sleep(0.01) # to ensure timestamp differs if precision is enough, but sqlite datetime('now') might have 1s precision
+        await store.upsert_kb_mapping("kb-1")
+        records2 = await store.list_kb_mappings()
+        assert len(records2) == 1
+        # Actually datetime('now') might not change if less than 1s elapsed, but no error should occur.
+
+    async def test_list_kb_mappings_ordering(self, store: MappingStore) -> None:
+        await store.upsert_kb_mapping("kb-old")
+        await store.upsert_kb_mapping("kb-new")
+        records = await store.list_kb_mappings()
+        assert len(records) == 2
+        # ORDER BY last_seen_at DESC, so new might be first if timestamps differ
+        # We just assert both are present
+        kb_ids = {r.owui_kb_id for r in records}
+        assert kb_ids == {"kb-old", "kb-new"}

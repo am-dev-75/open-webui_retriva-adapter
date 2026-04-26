@@ -10,7 +10,7 @@ from pathlib import Path
 import aiosqlite
 
 
-from adapter.models import MappingRecord
+from adapter.models import MappingRecord, KBMappingRecord
 
 from adapter.logger import get_logger
 
@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS file_mappings (
 
 CREATE INDEX IF NOT EXISTS idx_owui_file_id ON file_mappings(owui_file_id);
 CREATE INDEX IF NOT EXISTS idx_status ON file_mappings(status);
+
+CREATE TABLE IF NOT EXISTS kb_mappings (
+    owui_kb_id     TEXT    PRIMARY KEY,
+    retriva_kb_id  TEXT    NOT NULL,
+    last_seen_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -170,6 +176,38 @@ class MappingStore:
         if count:
             logger.info(f"mappings_pruned count={count}")
         return count
+
+    # -- kb mappings ---------------------------------------------------------
+
+    async def upsert_kb_mapping(self, owui_kb_id: str) -> None:
+        """Upsert a Knowledge Base mapping (1:1 passthrough)."""
+        now = datetime.now(timezone.utc).isoformat()
+        async with self._lock:
+            await self._conn.execute(
+                """
+                INSERT INTO kb_mappings (owui_kb_id, retriva_kb_id, last_seen_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(owui_kb_id) DO UPDATE SET
+                    last_seen_at=excluded.last_seen_at
+                """,
+                (owui_kb_id, owui_kb_id, now),
+            )
+            await self._conn.commit()
+
+    async def list_kb_mappings(self) -> list[KBMappingRecord]:
+        """Return all Knowledge Base mappings."""
+        cursor = await self._conn.execute(
+            "SELECT * FROM kb_mappings ORDER BY last_seen_at DESC",
+        )
+        rows = await cursor.fetchall()
+        return [
+            KBMappingRecord(
+                owui_kb_id=row["owui_kb_id"],
+                retriva_kb_id=row["retriva_kb_id"],
+                last_seen_at=row["last_seen_at"],
+            )
+            for row in rows
+        ]
 
     # -- helpers -------------------------------------------------------------
 

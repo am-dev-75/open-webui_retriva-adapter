@@ -201,7 +201,7 @@ class TestRetrivaClientMetadataForwarding:
     ) -> None:
         """FetchedFile with kb_ids and user_metadata should include them in the request."""
         route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{settings.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-meta"},
@@ -237,7 +237,7 @@ class TestRetrivaClientMetadataForwarding:
     ) -> None:
         """FetchedFile without metadata should not include extra fields."""
         route = respx.post(
-            f"{settings.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{settings.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok"},

@@ -94,7 +94,8 @@ def cp_settings(tmp_path: Path) -> Settings:
     return Settings(
         OWUI_BASE_URL="http://owui:3000",
         OWUI_API_KEY="test-key",
-        RETRIVA_BASE_URL="http://retriva:8400",
+        RETRIVA_INGESTION_API_HOST="retriva",
+        RETRIVA_INGESTION_PORT=8400,
         DB_PATH=tmp_path / "chatpoll_integ.db",
         POLL_INTERVAL_SECONDS=5,
         DEFAULT_KB_ID="kb-default",
@@ -222,7 +223,7 @@ class TestFileIngestedWithMetadata:
 
         # Step 2: File upload + ingestion with context
         _mock_download(s.OWUI_BASE_URL, "f-1")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await orch.ingest_with_context(["f-1"], "chat-1")
 
@@ -287,7 +288,7 @@ class TestTagStopDeactivates:
 
         # File uploaded after tag_stop → no user_metadata
         _mock_download(s.OWUI_BASE_URL, "f-nostop")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         result = await orch.ingest_with_context(["f-nostop"], "chat-1")
         assert result.ingested == 1
@@ -337,7 +338,7 @@ class TestChatIsolation:
         # Ingest from each chat
         _mock_download(s.OWUI_BASE_URL, "f-a")
         _mock_download(s.OWUI_BASE_URL, "f-b")
-        route = _mock_ingest(s.RETRIVA_BASE_URL)
+        route = _mock_ingest(s.retriva_ingestion_url)
 
         await orch.ingest_with_context(["f-a"], "chat-a")
         await orch.ingest_with_context(["f-b"], "chat-b")

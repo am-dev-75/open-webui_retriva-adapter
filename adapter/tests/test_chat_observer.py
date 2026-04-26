@@ -29,7 +29,8 @@ def chat_settings(tmp_path) -> Settings:
     return Settings(
         OWUI_BASE_URL="http://owui:3000",
         OWUI_API_KEY="test-key",
-        RETRIVA_BASE_URL="http://retriva:8400",
+        RETRIVA_INGESTION_API_HOST="retriva",
+        RETRIVA_INGESTION_PORT=8400,
         DB_PATH=tmp_path / "chat_obs.db",
         POLL_INTERVAL_SECONDS=5,
     )

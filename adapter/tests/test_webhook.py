@@ -36,7 +36,8 @@ def webhook_settings(tmp_path: Path) -> Settings:
     return Settings(
         OWUI_BASE_URL="http://owui:3000",
         OWUI_API_KEY="test-key",
-        RETRIVA_BASE_URL="http://retriva:8400",
+        RETRIVA_INGESTION_API_HOST="retriva",
+        RETRIVA_INGESTION_PORT=8400,
         DB_PATH=tmp_path / "webhook.db",
         POLL_INTERVAL_SECONDS=5,
         DEFAULT_KB_ID="default-kb",
@@ -107,7 +108,7 @@ class TestContextualIngestion:
 
         # 3. Mock Retriva ingest — capture the request
         ingest_route = respx.post(
-            f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{s.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok", "job_id": "j-ctx"},
@@ -152,7 +153,7 @@ class TestContextualIngestion:
         )
 
         ingest_route = respx.post(
-            f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{s.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok"},
@@ -212,7 +213,7 @@ class TestContextualIngestion:
         )
 
         ingest_route = respx.post(
-            f"{s.RETRIVA_BASE_URL}/api/v1/ingest/text",
+            f"{s.retriva_ingestion_url}/api/v1/ingest/text",
         ).mock(
             return_value=httpx.Response(
                 202, json={"status": "accepted", "message": "ok"},

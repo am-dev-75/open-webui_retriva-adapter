@@ -68,6 +68,17 @@ class MappingRecord:
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
     )
 
+@dataclass(slots=True)
+class KBMappingRecord:
+    """A durable Knowledge Base mapping stored in SQLite."""
+
+    owui_kb_id: str = ""
+    retriva_kb_id: str = ""
+    last_seen_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+
+
 
 # ---------------------------------------------------------------------------
 # Sync result summary
