@@ -1,4 +1,4 @@
-# Retriva Adapter (Pattern B-1)
+# Open WebUI to Retriva Adapter
 
 **Thin sidecar that mirrors Open WebUI file uploads into Retriva.**
 
@@ -19,11 +19,11 @@ cp .env.example .env
 
 Required variables:
 
-| Variable | Example |
-|---|---|
-| `OWUI_BASE_URL` | `http://localhost:3000` |
-| `OWUI_API_KEY` | `sk-...` (from OWUI Settings → Account) |
-| `RETRIVA_BASE_URL` | `http://localhost:8400` |
+| Variable           | Example                                 |
+| ------------------ | --------------------------------------- |
+| `OWUI_BASE_URL`    | `http://localhost:3000`                 |
+| `OWUI_API_KEY`     | `sk-...` (from OWUI Settings → Account) |
+| `RETRIVA_BASE_URL` | `http://localhost:8400`                 |
 
 ### 2. Run with Docker Compose
 
@@ -49,28 +49,28 @@ python -m adapter
 
 ## API Endpoints
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/healthz` | GET | Liveness probe |
-| `/readyz` | GET | Readiness probe (checks OWUI + Retriva) |
-| `/metrics` | GET | Prometheus metrics |
-| `/api/v1/sync` | POST | Force immediate sync cycle |
-| `/api/v1/mappings` | GET | List all file ↔ document mappings |
+| Endpoint           | Method | Description                             |
+| ------------------ | ------ | --------------------------------------- |
+| `/healthz`         | GET    | Liveness probe                          |
+| `/readyz`          | GET    | Readiness probe (checks OWUI + Retriva) |
+| `/metrics`         | GET    | Prometheus metrics                      |
+| `/api/v1/sync`     | POST   | Force immediate sync cycle              |
+| `/api/v1/mappings` | GET    | List all file ↔ document mappings       |
 
 ---
 
 ## Configuration Reference
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `OWUI_BASE_URL` | ✅ | — | Open WebUI base URL |
-| `OWUI_API_KEY` | ✅ | — | Bearer token for OWUI API |
-| `RETRIVA_BASE_URL` | ✅ | — | Retriva base URL |
-| `RETRIVA_API_KEY` | ❌ | — | Optional Retriva auth token |
-| `POLL_INTERVAL_SECONDS` | ❌ | `30` | Polling interval |
-| `DB_PATH` | ❌ | `./data/adapter.db` | SQLite database path |
-| `LOG_LEVEL` | ❌ | `INFO` | Logging level |
-| `ADAPTER_PORT` | ❌ | `8500` | HTTP server port |
+| Variable                | Required | Default             | Description                 |
+| ----------------------- | -------- | ------------------- | --------------------------- |
+| `OWUI_BASE_URL`         | ✅        | —                   | Open WebUI base URL         |
+| `OWUI_API_KEY`          | ✅        | —                   | Bearer token for OWUI API   |
+| `RETRIVA_BASE_URL`      | ✅        | —                   | Retriva base URL            |
+| `RETRIVA_API_KEY`       | ❌        | —                   | Optional Retriva auth token |
+| `POLL_INTERVAL_SECONDS` | ❌        | `30`                | Polling interval            |
+| `DB_PATH`               | ❌        | `./data/adapter.db` | SQLite database path        |
+| `LOG_LEVEL`             | ❌        | `INFO`              | Logging level               |
+| `ADAPTER_PORT`          | ❌        | `8500`              | HTTP server port            |
 
 ---
 
@@ -106,12 +106,12 @@ python -m pytest tests/ -v
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Adapter logs "OWUI unreachable" | Wrong `OWUI_BASE_URL` or network | Verify URL and connectivity |
-| Files not syncing | Invalid `OWUI_API_KEY` | Regenerate key in OWUI Settings → Account |
-| Duplicate ingestions | Should not happen (UNIQUE constraint) | Check adapter logs for errors |
-| Adapter crash on startup | Missing required env vars | Set `OWUI_BASE_URL`, `OWUI_API_KEY`, `RETRIVA_BASE_URL` |
+| Symptom                         | Cause                                 | Fix                                                     |
+| ------------------------------- | ------------------------------------- | ------------------------------------------------------- |
+| Adapter logs "OWUI unreachable" | Wrong `OWUI_BASE_URL` or network      | Verify URL and connectivity                             |
+| Files not syncing               | Invalid `OWUI_API_KEY`                | Regenerate key in OWUI Settings → Account               |
+| Duplicate ingestions            | Should not happen (UNIQUE constraint) | Check adapter logs for errors                           |
+| Adapter crash on startup        | Missing required env vars             | Set `OWUI_BASE_URL`, `OWUI_API_KEY`, `RETRIVA_BASE_URL` |
 
 ---
 
