@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     MAX_RETRIES: int = Field(default=3, ge=0)
     BACKOFF_BASE_SECONDS: float = Field(default=1.0, gt=0)
     BACKOFF_MAX_SECONDS: float = Field(default=30.0, gt=0)
-    HTTP_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0)
+    HTTP_TIMEOUT_SECONDS: float = Field(default=300.0, gt=0)
 
     # --- Computed URLs -------------------------------------------------------
 
@@ -164,4 +164,3 @@ def load_settings(**overrides: object) -> Settings:
     Keyword arguments override environment variables – useful in tests.
     """
     return Settings(**overrides)  # type: ignore[arg-type]
-
