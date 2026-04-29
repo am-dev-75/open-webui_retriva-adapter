@@ -141,6 +141,34 @@ def _extract_all_human_user_texts(messages: list[dict[str, Any]]) -> list[str]:
     return user_texts
 
 
+def _extract_all_user_content(messages: list[dict[str, Any]]) -> str:
+    """Extract all text from user messages in the turn, combined."""
+    texts = []
+    for msg in messages:
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+                content_str = "\n".join(parts)
+            else:
+                content_str = str(content)
+            texts.append(content_str)
+    return "\n".join(texts)
+
+
+def _has_owui_markers(messages: list[dict[str, Any]]) -> bool:
+    """Check if any message in the turn contains OWUI synthetic markers."""
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content_str = "\n".join([p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"])
+        else:
+            content_str = str(content)
+        if not is_human_authored_text(content_str):
+            return True
+    return False
+
+
 def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) -> TurnClassification:
     """Classify a chat completion request into a routing decision.
 
@@ -158,12 +186,11 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
     """
     messages = request_body.get("messages", [])
     user_texts = _extract_all_human_user_texts(messages)
+    all_user_content = _extract_all_user_content(messages)
+    has_owui_markers = _has_owui_markers(messages)
     
-    # Use the last human-authored text for directive parsing
-    user_content = user_texts[-1] if user_texts else ""
-
-    # 1. Parse directives
-    directive_result = parse_directive(user_content)
+    # 1. Parse directives from all user content (more robust than just human-authored)
+    directive_result = parse_directive(all_user_content)
     has_directive = directive_result.action != "none"
 
     # Context will be active if it was already active, or if this turn starts it
@@ -173,7 +200,9 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
     elif directive_result.action == "tag_stop":
         context_will_be_active = False
 
-    stripped = _strip_directives(user_content)
+    # For question detection, we use the combined human-authored text
+    human_content = "\n".join(user_texts)
+    stripped = _strip_directives(human_content)
     
     # 2. Check if there is a real human question
     has_real_question = False
@@ -201,8 +230,15 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
         # Purely synthetic or completely empty user turn must be intercepted
         is_upload_only = True
     else:
-        # Has human text, but if it lacks a real question, it's upload-only IF context is active
-        is_upload_only = not has_real_question and context_will_be_active
+        # Has human text. It's an upload if:
+        # 1. It lacks a real question
+        # 2. Tagging is active (or starting)
+        # 3. We see OWUI markers (indicates synthetic turn accompanying human text)
+        is_upload_only = (
+            not has_real_question 
+            and context_will_be_active 
+            and has_owui_markers
+        )
 
     has_substantive_question = has_real_question
 

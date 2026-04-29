@@ -132,8 +132,11 @@ class RetrivaClient:
         # Forward metadata when present (Pattern A + revised Pattern D)
         if fetched.kb_ids:
             data["kb_ids"] = json.dumps(list(fetched.kb_ids))
+        logger.debug(f"DEBUG: RetrivaClient._forward_multipart user_metadata={fetched.user_metadata!r}")
         if fetched.user_metadata:
-            data["user_metadata"] = json.dumps(fetched.metadata_dict())
+            metadata_json = json.dumps(fetched.metadata_dict())
+            logger.debug(f"DEBUG: RetrivaClient sending user_metadata={metadata_json!r}")
+            data["user_metadata"] = metadata_json
 
         response = await self._client.post(
             url,
