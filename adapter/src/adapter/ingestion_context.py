@@ -84,6 +84,7 @@ class IngestionContext:
                 ctx.state = "ACTIVE"
                 ctx.user_metadata = dict(directive.metadata)  # full replace
                 ctx.last_updated = now
+                logger.debug(f"DEBUG: IngestionContext ACTIVE chat_id={chat_id} metadata={ctx.user_metadata!r}")
                 logger.info(
                     f"ingestion_context_activated chat_id={chat_id} "
                     f"metadata_keys={list(directive.metadata.keys())}"
@@ -135,22 +136,38 @@ class IngestionContext:
                 return dict(ctx.user_metadata)
         return None
 
-    def get_ingestion_payload(self, chat_id: str) -> dict:
+    def get_ingestion_payload(self, chat_id: str | None) -> dict:
         """Build the combined ingestion payload for a chat.
 
-        Returns::
-
-            {
-                "kb_ids": [...],
-                "user_metadata": {...}   # empty dict if tagging inactive
-            }
+        If chat_id is None, it attempts to find the most recently updated
+        active metadata context as a global fallback.
         """
-        kb_ids = self.get_kb_ids(chat_id)
-        metadata = self.get_metadata(chat_id) or {}
+        if chat_id is None:
+            kb_ids = [self._default_kb_id] if self._default_kb_id else []
+            metadata = self.get_recent_active_metadata() or {}
+        else:
+            kb_ids = self.get_kb_ids(chat_id)
+            metadata = self.get_metadata(chat_id) or {}
+
         return {
             "kb_ids": kb_ids,
             "user_metadata": metadata,
         }
+
+    def get_recent_active_metadata(self) -> dict[str, str] | None:
+        """Find the metadata of the most recently updated ACTIVE chat."""
+        with self._lock:
+            active_chats = [
+                (c.last_updated, c.user_metadata)
+                for c in self._chats.values()
+                if c.state == "ACTIVE" and c.user_metadata
+            ]
+            if not active_chats:
+                return None
+            
+            # Sort by last_updated descending
+            active_chats.sort(key=lambda x: x[0], reverse=True)
+            return dict(active_chats[0][1])
 
     # ------------------------------------------------------------------
     # Debug / introspection

@@ -48,6 +48,7 @@ class Settings(BaseSettings):
         env_prefix="",
         case_sensitive=True,
         populate_by_name=True,
+        extra="ignore",
     )
 
     # --- Required -----------------------------------------------------------

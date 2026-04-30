@@ -35,7 +35,12 @@ class FileFetcher:
         self._api_key = settings.OWUI_API_KEY
         self._client = client
 
-    async def download(self, file_info: OWUIFile) -> FetchedFile | None:
+    async def download(
+        self,
+        file_info: OWUIFile,
+        kb_ids: tuple[str, ...] = (),
+        user_metadata: tuple[tuple[str, str], ...] = (),
+    ) -> FetchedFile | None:
         """Download a single file from OWUI.
 
         Returns ``None`` if the file no longer exists (404).
@@ -73,6 +78,8 @@ class FileFetcher:
             content_type=content_type,
             content=content,
             size=len(content),
+            kb_ids=kb_ids,
+            user_metadata=user_metadata,
         )
         logger.info(f"file_downloaded file_id={file_info.id} filename={file_info.filename} size={fetched.size}")
         return fetched

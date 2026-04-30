@@ -74,7 +74,21 @@ class SyncOrchestrator:
             # --- 2. Ingest new files ---
             for file_info in changes.to_ingest:
                 try:
-                    fetched = await self._fetcher.download(file_info)
+                    # Resolve metadata payload from the ingestion context (global fallback)
+                    payload: dict = {}
+                    if self._ingestion_ctx:
+                        payload = self._ingestion_ctx.get_ingestion_payload(None)
+
+                    kb_ids = tuple(payload.get("kb_ids", []))
+                    user_metadata = tuple(
+                        (k, v) for k, v in payload.get("user_metadata", {}).items()
+                    )
+
+                    fetched = await self._fetcher.download(
+                        file_info,
+                        kb_ids=kb_ids,
+                        user_metadata=user_metadata,
+                    )
                     if fetched is None:
                         result.skipped += 1
                         continue
@@ -138,7 +152,21 @@ class SyncOrchestrator:
                         filename=mapping.filename,
                         content_type=mapping.content_type,
                     )
-                    fetched = await self._fetcher.download(file_info)
+                    # Resolve metadata payload from the ingestion context (global fallback)
+                    payload: dict = {}
+                    if self._ingestion_ctx:
+                        payload = self._ingestion_ctx.get_ingestion_payload(None)
+
+                    kb_ids = tuple(payload.get("kb_ids", []))
+                    user_metadata = tuple(
+                        (k, v) for k, v in payload.get("user_metadata", {}).items()
+                    )
+
+                    fetched = await self._fetcher.download(
+                        file_info,
+                        kb_ids=kb_ids,
+                        user_metadata=user_metadata,
+                    )
                     if fetched is None:
                         # File no longer exists in OWUI — mark deleted
                         await self._store.update_status(
@@ -230,7 +258,11 @@ class SyncOrchestrator:
 
                 file_info = OWUIFile(id=file_id, filename=f"webhook:{file_id}")
 
-                fetched = await self._fetcher.download(file_info)
+                fetched = await self._fetcher.download(
+                    file_info,
+                    kb_ids=kb_ids,
+                    user_metadata=user_metadata,
+                )
                 if fetched is None:
                     result.skipped += 1
                     continue

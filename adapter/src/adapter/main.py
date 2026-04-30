@@ -409,6 +409,7 @@ async def receive_chat_message(payload: ChatMessagePayload) -> dict[str, Any]:
         return {"error": "adapter not initialized"}
 
     metrics.webhook_messages_total.inc()
+    logger.debug(f"DEBUG: receive_chat_message chat_id={payload.chat_id!r} message={payload.message!r} file_ids={payload.file_ids!r}")
 
     # 1. Update KB IDs (always, independent of directives)
     if payload.kb_ids:
