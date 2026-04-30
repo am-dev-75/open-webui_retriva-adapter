@@ -90,7 +90,8 @@ def _has_explicit_intent(text: str) -> bool:
     action_verbs = {
         "please", "explain", "summarize", "summarise", "tell", "describe",
         "analyze", "analyse", "compare", "help", "read", "review",
-        "give", "provide", "extract", "find", "look"
+        "give", "provide", "extract", "find", "look",
+        "generate", "create", "list", "show", "search", "get", "write", "make"
     }
     for word in words[:3]:
         if word in action_verbs:
@@ -169,6 +170,21 @@ def _has_owui_markers(messages: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _get_current_turn_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the slice of messages belonging to the current turn (post-last-assistant)."""
+    if not messages:
+        return []
+    
+    # Find index of last assistant message
+    last_assistant_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "assistant":
+            last_assistant_idx = i
+            break
+            
+    return messages[last_assistant_idx + 1:]
+
+
 def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) -> TurnClassification:
     """Classify a chat completion request into a routing decision.
 
@@ -185,9 +201,11 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
         Contains the routing decision and extracted metadata.
     """
     messages = request_body.get("messages", [])
-    user_texts = _extract_all_human_user_texts(messages)
-    all_user_content = _extract_all_user_content(messages)
-    has_owui_markers = _has_owui_markers(messages)
+    current_turn_messages = _get_current_turn_messages(messages)
+    
+    user_texts = _extract_all_human_user_texts(current_turn_messages)
+    all_user_content = _extract_all_user_content(current_turn_messages)
+    has_owui_markers = _has_owui_markers(current_turn_messages)
     
     # 1. Parse directives from all user content (more robust than just human-authored)
     directive_result = parse_directive(all_user_content)
