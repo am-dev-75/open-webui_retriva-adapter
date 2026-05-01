@@ -134,7 +134,18 @@ class SyncOrchestrator:
                     await self._store.update_status(owui_file_id, "deleted")
                     result.deleted += 1
                     metrics.files_deleted_total.inc()
-                except (httpx.HTTPError, Exception) as exc:
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        logger.info(f"document not present; skipping owui_file_id={owui_file_id}")
+                        await self._store.update_status(owui_file_id, "deleted")
+                        result.deleted += 1
+                        metrics.files_deleted_total.inc()
+                    else:
+                        logger.error(f"delete_failed owui_file_id={owui_file_id} error={exc}")
+                        result.failed += 1
+                        result.errors.append(f"delete:{owui_file_id}:{exc}")
+                        metrics.sync_errors_total.inc()
+                except Exception as exc:
                     logger.error(f"delete_failed owui_file_id={owui_file_id} error={exc}")
                     result.failed += 1
                     result.errors.append(f"delete:{owui_file_id}:{exc}")
@@ -237,6 +248,16 @@ class SyncOrchestrator:
             await self._store.prune_deleted()
             metrics.files_deleted_total.inc()
             return True
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.info(f"document not present; skipping file_id={owui_file_id}")
+                await self._store.update_status(owui_file_id, "deleted")
+                await self._store.prune_deleted()
+                metrics.files_deleted_total.inc()
+                return True
+            logger.error(f"webhook_delete_failed file_id={owui_file_id} error={exc}")
+            metrics.sync_errors_total.inc()
+            return False
         except Exception as exc:
             logger.error(f"webhook_delete_failed file_id={owui_file_id} error={exc}")
             metrics.sync_errors_total.inc()
