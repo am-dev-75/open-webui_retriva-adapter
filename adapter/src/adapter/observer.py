@@ -80,6 +80,19 @@ class FileObserver:
         logger.debug(f"owui_files_listed count={len(files)}")
         return files
 
+    async def list_knowledge_bases(self) -> list[str]:
+        """Fetch the current knowledge base IDs from Open WebUI."""
+        url = f"{self._base_url}/api/v1/knowledge/"
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+
+        response = await self._client.get(url, headers=headers)
+        response.raise_for_status()
+
+        data = response.json()
+        # OWUI returns a list of objects in 'items' or a raw list
+        items = data if isinstance(data, list) else data.get("items", [])
+        return [item["id"] for item in items if "id" in item]
+
     def detect_changes(
         self,
         owui_files: list[OWUIFile],

@@ -484,24 +484,61 @@ async def receive_owui_event(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
     event_type = event_data.get("event", "unknown")
-    # Open WebUI often puts the payload in a key named after the entity (e.g., 'file', 'knowledge', 'user')
-    # or in a generic 'data' key. We check them all.
-    payload = event_data.get("data") or event_data.get("knowledge") or event_data.get("file") or event_data.get("user") or event_data.get("chat") or {}
+    
+    # 1. Extract KB ID if present and upsert mapping
+    kb_id = None
+    if "knowledge" in event_data:
+        kb_payload = event_data["knowledge"]
+        kb_id = kb_payload.get("id") or kb_payload.get("knowledge_id")
+    
+    # Check data for kb_id as fallback
+    if not kb_id and "data" in event_data:
+        kb_id = event_data["data"].get("knowledge_id") or event_data["data"].get("kb_id")
 
-    logger.info(f"owui_event_received type={event_type} payload_keys={list(payload.keys())}")
+    if kb_id and _store:
+        try:
+            await _store.upsert_kb_mapping(kb_id)
+            logger.info(f"kb_mapping_upserted kb_id={kb_id} (via webhook)")
+        except Exception as e:
+            logger.error(f"failed to upsert kb_mapping kb_id={kb_id} err={e}")
 
-    # knowledge.document.added | file.created | new_user (can trigger a sync for the new user)
+    # 2. Route events
+    # Ingestion: knowledge.document.added | file.created
     if event_type in ("knowledge.document.added", "file.created"):
-        file_id = payload.get("id")
+        # Document ID could be in various places
+        file_id = None
+        if "file" in event_data:
+            file_id = event_data["file"].get("id")
+        elif "data" in event_data:
+            data_payload = event_data["data"]
+            file_id = data_payload.get("id") or data_payload.get("document_id") or data_payload.get("file_id")
+        
+        # Fallback for knowledge events
+        if not file_id and "knowledge" in event_data:
+            kb_payload = event_data["knowledge"]
+            file_id = kb_payload.get("document_id") or kb_payload.get("data", {}).get("file_id")
+
         if file_id:
             async with _sync_lock:
-                # Global knowledge uploads use 'default' context
-                await _orchestrator.ingest_with_context([file_id], "default")
-            return {"status": "ingestion_triggered", "file_id": file_id}
+                # Global uploads use 'default' chat context, supplemented by explicit KB ID
+                kb_ids = [kb_id] if kb_id else []
+                await _orchestrator.ingest_with_context(
+                    [file_id], chat_id="default", kb_ids=kb_ids
+                )
+            return {
+                "status": "ingestion_triggered",
+                "file_id": file_id,
+                "kb_id": kb_id
+            }
 
-    # knowledge.document.deleted | file.deleted
+    # Deletion: knowledge.document.deleted | file.deleted
     elif event_type in ("knowledge.document.deleted", "file.deleted"):
-        file_id = payload.get("id")
+        file_id = None
+        if "file" in event_data:
+            file_id = event_data["file"].get("id")
+        elif "data" in event_data:
+            file_id = event_data["data"].get("id")
+        
         if file_id:
             success = await _orchestrator.delete_by_file_id(file_id)
             return {

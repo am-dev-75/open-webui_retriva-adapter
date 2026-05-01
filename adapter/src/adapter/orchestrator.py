@@ -66,6 +66,15 @@ class SyncOrchestrator:
         result = SyncResult()
 
         try:
+            # --- 0. Sync Knowledge Bases ---
+            # Ensure all OWUI collections have a mirrored KB in Retriva
+            try:
+                kb_ids = await self._observer.list_knowledge_bases()
+                for kb_id in kb_ids:
+                    await self._store.upsert_kb_mapping(kb_id)
+            except Exception as e:
+                logger.error(f"failed to sync kb_mappings err={e}")
+
             # --- 1. Observe ---
             owui_files = await self._observer.list_files()
             synced_ids = await self._store.get_synced_file_ids()
@@ -270,13 +279,17 @@ class SyncOrchestrator:
     async def ingest_with_context(
         self,
         file_ids: list[str],
-        chat_id: str,
+        chat_id: str | None = None,
+        kb_ids: list[str] | tuple[str, ...] | None = None,
     ) -> SyncResult:
         """Ingest specific files with metadata from the chat ingestion context.
 
         This is the webhook-triggered ingestion path.  Unlike ``run_cycle()``,
         it ingests *only* the specified files and enriches them with
         ``kb_ids`` and ``user_metadata`` from the active ingestion context.
+
+        If ``kb_ids`` are provided explicitly, they override/supplement the
+        context.
         """
         result = SyncResult()
 
@@ -285,7 +298,15 @@ class SyncOrchestrator:
         if self._ingestion_ctx:
             payload = self._ingestion_ctx.get_ingestion_payload(chat_id)
 
-        kb_ids = tuple(payload.get("kb_ids", []))
+        # Merge explicit kb_ids if provided
+        final_kb_ids: list[str] = list(payload.get("kb_ids", []))
+        if kb_ids:
+            # Add explicit ones, avoid duplicates
+            for kid in kb_ids:
+                if kid not in final_kb_ids:
+                    final_kb_ids.append(kid)
+        
+        final_kb_ids_tuple = tuple(final_kb_ids)
         user_metadata = tuple(
             (k, v) for k, v in payload.get("user_metadata", {}).items()
         )
@@ -305,7 +326,7 @@ class SyncOrchestrator:
 
                 fetched = await self._fetcher.download(
                     file_info,
-                    kb_ids=kb_ids,
+                    kb_ids=final_kb_ids_tuple,
                     user_metadata=user_metadata,
                 )
                 if fetched is None:
@@ -319,7 +340,7 @@ class SyncOrchestrator:
                     content_type=fetched.content_type,
                     content=fetched.content,
                     size=fetched.size,
-                    kb_ids=kb_ids,
+                    kb_ids=final_kb_ids_tuple,
                     user_metadata=user_metadata,
                 )
 
@@ -353,7 +374,7 @@ class SyncOrchestrator:
                 metrics.files_synced_total.inc()
                 logger.info(
                     f"contextual_ingest_succeeded file_id={file_id} "
-                    f"doc_id={doc_id} kb_ids={kb_ids} "
+                    f"doc_id={doc_id} kb_ids={final_kb_ids_tuple} "
                     f"metadata_keys={[k for k, _ in user_metadata]}"
                 )
             except Exception as exc:
