@@ -218,6 +218,30 @@ class SyncOrchestrator:
         logger.info(f"sync_cycle_complete ingested={result.ingested} deleted={result.deleted} failed={result.failed} retried={result.retried} skipped={result.skipped} duration_s={round(elapsed, 3)}")
         return result
 
+    async def delete_by_file_id(self, owui_file_id: str) -> bool:
+        """Trigger immediate deletion of a file by its OWUI ID.
+
+        This is the webhook-triggered deletion path.
+        """
+        try:
+            mapping = await self._store.get_by_file_id(owui_file_id)
+            if mapping and mapping.retriva_doc_id:
+                await self._retriva.delete_document(mapping.retriva_doc_id)
+                logger.info(
+                    f"webhook_delete_succeeded file_id={owui_file_id} "
+                    f"doc_id={mapping.retriva_doc_id}"
+                )
+
+            # Mark as deleted in store
+            await self._store.update_status(owui_file_id, "deleted")
+            await self._store.prune_deleted()
+            metrics.files_deleted_total.inc()
+            return True
+        except Exception as exc:
+            logger.error(f"webhook_delete_failed file_id={owui_file_id} error={exc}")
+            metrics.sync_errors_total.inc()
+            return False
+
     # ------------------------------------------------------------------
     # Context-aware ingestion (webhook-triggered)
     # ------------------------------------------------------------------

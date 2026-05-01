@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -153,9 +154,9 @@ async def lifespan(app: FastAPI):  # noqa: ANN201, ARG001
             max_instances=1,
         )
     _scheduler.start()
-    logger.info(f"scheduler_started file_sync_interval_s={_settings.POLL_INTERVAL_SECONDS}")
+    logger.info(f"scheduler_started fallback_sync_interval_s={_settings.POLL_INTERVAL_SECONDS}")
     if _settings.CHAT_POLL_ENABLED:
-        logger.info(f"chat_poll_started interval_s={_settings.CHAT_POLL_INTERVAL_SECONDS}")
+        logger.info(f"chat_poll_started fallback_interval_s={_settings.CHAT_POLL_INTERVAL_SECONDS}")
 
     # Register debug endpoints if enabled
     if _settings.ENABLE_DEBUG_ENDPOINTS:
@@ -277,6 +278,17 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
 
     # Apply directive to ingestion context once, before branching
     _apply_directive_if_needed(classification, body)
+
+    # --- Proactive Ingestion (for all turns) ---
+    # Trigger proactive sync if files are detected in the request, regardless of routing.
+    # This provides a robust fallback if the Filter or Webhooks fail to notify the adapter.
+    if _orchestrator:
+        # Extract file IDs from markers (resource-id="...") in the request body
+        file_ids = re.findall(r'resource-id="([a-f0-9-]{36})"', str(body))
+        if file_ids:
+            logger.info(f"proactive_ingestion_triggered chat_id={chat_id} file_ids={file_ids} route={route}")
+            # Fire and forget ingestion in the background so we don't block the UI
+            asyncio.create_task(_orchestrator.ingest_with_context(file_ids, chat_id))
 
     # --- Intercepted routes: return synthetic acknowledgement ---
     if route != "forward":
@@ -450,6 +462,55 @@ async def receive_chat_message(payload: ChatMessagePayload) -> dict[str, Any]:
         }
 
     return result_data
+
+
+# ---------------------------------------------------------------------------
+# System events webhook (Knowledge base changes)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/events")
+async def receive_owui_event(request: Request) -> dict[str, Any]:
+    """Receive system-level events from Open WebUI Webhooks.
+
+    Handles 'knowledge' and 'file' events for immediate sync, replacing
+    the need for frequent polling.
+    """
+    if not _orchestrator:
+        return {"error": "adapter not initialized"}
+
+    try:
+        event_data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = event_data.get("event", "unknown")
+    # Open WebUI often puts the payload in a key named after the entity (e.g., 'file', 'knowledge', 'user')
+    # or in a generic 'data' key. We check them all.
+    payload = event_data.get("data") or event_data.get("knowledge") or event_data.get("file") or event_data.get("user") or event_data.get("chat") or {}
+
+    logger.info(f"owui_event_received type={event_type} payload_keys={list(payload.keys())}")
+
+    # knowledge.document.added | file.created | new_user (can trigger a sync for the new user)
+    if event_type in ("knowledge.document.added", "file.created"):
+        file_id = payload.get("id")
+        if file_id:
+            async with _sync_lock:
+                # Global knowledge uploads use 'default' context
+                await _orchestrator.ingest_with_context([file_id], "default")
+            return {"status": "ingestion_triggered", "file_id": file_id}
+
+    # knowledge.document.deleted | file.deleted
+    elif event_type in ("knowledge.document.deleted", "file.deleted"):
+        file_id = payload.get("id")
+        if file_id:
+            success = await _orchestrator.delete_by_file_id(file_id)
+            return {
+                "status": "deletion_processed",
+                "file_id": file_id,
+                "success": success,
+            }
+
+    return {"status": "ignored", "event_type": event_type}
 
 
 # ---------------------------------------------------------------------------

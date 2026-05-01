@@ -245,8 +245,20 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
     if not has_user_role:
         is_upload_only = False
     elif not user_texts:
-        # Purely synthetic or completely empty user turn must be intercepted
-        is_upload_only = True
+        # It is purely synthetic or empty.
+        # We only treat it as an "upload turn" if the actual USER content is empty.
+        if has_owui_markers:
+            # Check for embedded user message in the CURRENT turn part of the prompt.
+            # We look for the LAST 'USER:' marker to see if the current turn has text.
+            # We use (?mi) for multiline/case-insensitive and \S to find any actual text.
+            has_embedded_user_text = (
+                bool(re.search(r"(?mi)USER:\s*\S(?!.*USER:)", all_user_content, re.DOTALL)) or
+                bool(re.search(r"(?i)</context>\s*\S", all_user_content))
+            )
+            is_upload_only = not has_embedded_user_text
+        else:
+            # Truly empty/whitespace only
+            is_upload_only = not all_user_content.strip()
     else:
         # Has human text. It's an upload if:
         # 1. It lacks a real question
@@ -256,6 +268,7 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
             not has_real_question 
             and context_will_be_active 
             and has_owui_markers
+            and not re.search(r"(?mi)^USER:\s*\S", all_user_content)
         )
 
     has_substantive_question = has_real_question
@@ -281,7 +294,9 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
 
     logger.debug(
         f"turn_classified route={route} has_directive={has_directive} "
-        f"is_upload_only={is_upload_only} has_question={has_substantive_question}"
+        f"is_upload_only={is_upload_only} has_question={has_substantive_question} "
+        f"has_human_text={bool(user_texts)} has_owui_markers={has_owui_markers} "
+        f"context_active={context_will_be_active}"
     )
 
     return TurnClassification(

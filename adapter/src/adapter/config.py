@@ -93,9 +93,9 @@ class Settings(BaseSettings):
         description="Optional Retriva auth token",
     )
     POLL_INTERVAL_SECONDS: int = Field(
-        default=30,
+        default=5,
         ge=5,
-        description="Seconds between polling cycles",
+        description="Seconds between fallback polling cycles (now push-based via webhooks)",
     )
     DB_PATH: Path = Field(
         default=Path("./data/adapter.db"),
@@ -125,13 +125,13 @@ class Settings(BaseSettings):
 
     # --- Chat polling (directive observation) --------------------------------
     CHAT_POLL_ENABLED: bool = Field(
-        default=True,
-        description="Enable chat message polling for directive detection",
+        default=False,
+        description="Enable chat message polling for directive detection (fallback only)",
     )
     CHAT_POLL_INTERVAL_SECONDS: int = Field(
-        default=5,
+        default=60,
         ge=1,
-        description="Seconds between chat message polling cycles (directive responsiveness)",
+        description="Seconds between chat message polling cycles (fallback)",
     )
 
     # --- Retry tuning --------------------------------------------------------

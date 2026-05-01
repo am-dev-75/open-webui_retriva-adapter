@@ -145,3 +145,31 @@ class TestSyncOrchestrator:
 
         assert result.skipped == 1
         assert result.ingested == 0
+
+    async def test_delete_by_file_id(self, orchestrator_deps) -> None:
+        """delete_by_file_id removes the document from Retriva and the store."""
+        orch, _, _, retriva, store = orchestrator_deps
+
+        # 1. Setup existing mapping
+        await store.create("f-del", "del.txt", "d-del", status="synced")
+        retriva.delete_document = AsyncMock()
+
+        # 2. Trigger immediate deletion
+        success = await orch.delete_by_file_id("f-del")
+
+        assert success is True
+        retriva.delete_document.assert_called_once_with("d-del")
+
+        # 3. Verify mapping is gone (pruned after status=deleted)
+        mapping = await store.get_by_file_id("f-del")
+        assert mapping is None
+
+    async def test_delete_by_file_id_not_found(self, orchestrator_deps) -> None:
+        """delete_by_file_id is graceful if the file ID is unknown."""
+        orch, _, _, retriva, _ = orchestrator_deps
+        retriva.delete_document = AsyncMock()
+
+        success = await orch.delete_by_file_id("f-unknown")
+
+        assert success is True  # still returns true because there's nothing to do
+        retriva.delete_document.assert_not_called()
