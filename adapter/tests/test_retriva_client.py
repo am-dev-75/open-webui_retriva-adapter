@@ -25,7 +25,7 @@ import respx
 
 from adapter.config import Settings
 from adapter.models import FetchedFile
-from adapter.retriva_client import RetrivaClient
+from adapter.retriva_client import RetrivaClientV1, RetrivaClientV2
 
 
 class TestRetrivaClientRouting:
@@ -48,7 +48,7 @@ class TestRetrivaClientRouting:
             content_type="text/plain", content=b"Hello world", size=11,
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             doc_id = await rc.ingest(fetched)
 
         assert doc_id == "owui:f-1"
@@ -76,7 +76,7 @@ class TestRetrivaClientRouting:
             content_type="text/html", content=b"<h1>Hello</h1>", size=14,
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             doc_id = await rc.ingest(fetched)
 
         assert doc_id == "owui:f-2"
@@ -91,7 +91,7 @@ class TestRetrivaClientRouting:
             content=b"binary", size=6,
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             with pytest.raises(ValueError, match="Unsupported content type"):
                 await rc.ingest(fetched)
 
@@ -114,7 +114,7 @@ class TestRetrivaClientRouting:
             content=b"some text", size=9,
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             await rc.ingest(fetched)
 
         assert route.called
@@ -143,7 +143,7 @@ class TestRetrivaClientPdf:
         )
 
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             doc_id = await rc.ingest(fetched)
 
         assert doc_id == "owui:f-pdf"
@@ -169,7 +169,7 @@ class TestRetrivaClientPdf:
         )
 
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             with pytest.raises(httpx.HTTPStatusError):
                 await rc.ingest(fetched)
 
@@ -183,7 +183,7 @@ class TestRetrivaClientDeleteHealth:
             return_value=httpx.Response(200),
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             await rc.delete_document("d-1")  # should not raise
 
     @respx.mock
@@ -192,7 +192,7 @@ class TestRetrivaClientDeleteHealth:
             return_value=httpx.Response(200),
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             assert await rc.health() is True
 
     @respx.mock
@@ -201,7 +201,7 @@ class TestRetrivaClientDeleteHealth:
             side_effect=httpx.ConnectError("refused"),
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             assert await rc.health() is False
 
 
@@ -228,7 +228,7 @@ class TestRetrivaClientMetadataForwarding:
             user_metadata=(("project", "Apollo"), ("milestone", "M4")),
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             doc_id = await rc.ingest(fetched)
 
         assert doc_id == "owui:f-meta"
@@ -262,7 +262,7 @@ class TestRetrivaClientMetadataForwarding:
             content_type="text/plain", content=b"plain", size=5,
         )
         async with httpx.AsyncClient() as client:
-            rc = RetrivaClient(settings, client)
+            rc = RetrivaClientV1(settings, client)
             await rc.ingest(fetched)
 
         assert route.called
@@ -270,3 +270,56 @@ class TestRetrivaClientMetadataForwarding:
         # Should NOT contain kb_ids or user_metadata form fields
         assert "kb_ids" not in body
         assert "user_metadata" not in body
+
+
+class TestRetrivaClientV2:
+    """RetrivaClientV2 tests."""
+
+    @respx.mock
+    async def test_ingest_v2_routes_to_documents(self, settings: Settings) -> None:
+        """V2 should always route to /api/v2/documents."""
+        route = respx.post(
+            f"{settings.retriva_ingestion_url}/api/v2/documents",
+        ).mock(
+            return_value=httpx.Response(
+                202, json={"status": "accepted", "message": "ok", "job_id": "j-v2"},
+            ),
+        )
+
+        fetched = FetchedFile(
+            file_id="f-v2", filename="test.pdf",
+            content_type="application/pdf", content=b"content", size=7,
+            kb_ids=("kb-1",),
+            user_metadata=(("author", "tester"),),
+        )
+
+        async with httpx.AsyncClient() as client:
+            rc = RetrivaClientV2(settings, client)
+            doc_id = await rc.ingest(fetched)
+
+        assert doc_id == "owui:f-v2"
+        assert route.called
+
+        request = route.calls[0].request
+        body = request.content.decode("utf-8", errors="replace")
+        
+        # Verify it went to correct endpoint
+        assert request.url.path == "/api/v2/documents"
+        
+        # Verify metadata is attached
+        assert "kb_ids" in body
+        assert "kb-1" in body
+        assert "user_metadata" in body
+        assert "tester" in body
+
+    @respx.mock
+    async def test_delete_v2_routes_to_documents(self, settings: Settings) -> None:
+        route = respx.delete(
+            f"{settings.retriva_ingestion_url}/api/v2/documents/d-2",
+        ).mock(return_value=httpx.Response(200))
+
+        async with httpx.AsyncClient() as client:
+            rc = RetrivaClientV2(settings, client)
+            await rc.delete_document("d-2")
+
+        assert route.called

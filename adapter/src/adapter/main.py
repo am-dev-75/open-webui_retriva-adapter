@@ -40,7 +40,7 @@ from adapter.models import ChatMessagePayload, SyncResult
 from adapter.observer import FileObserver
 from adapter.chat_observer import ChatObserver
 from adapter.orchestrator import SyncOrchestrator
-from adapter.retriva_client import RetrivaClient
+from adapter.retriva_client import create_retriva_client
 from adapter.synthetic_response import build_response
 from adapter.turn_classifier import classify
 
@@ -126,7 +126,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN201, ARG001
 
     observer = FileObserver(_settings, _http_client)
     fetcher = FileFetcher(_settings, _http_client)
-    retriva = RetrivaClient(_settings, _http_client)
+    retriva = create_retriva_client(_settings, _http_client)
     _orchestrator = SyncOrchestrator(
         observer, fetcher, retriva, _store,
         ingestion_context=_ingestion_ctx,
@@ -213,7 +213,7 @@ async def readyz() -> dict[str, Any]:
 
     # Check Retriva
     try:
-        retriva = RetrivaClient(_settings, _http_client)  # type: ignore[arg-type]
+        retriva = create_retriva_client(_settings, _http_client)  # type: ignore[arg-type]
         checks["retriva"] = await retriva.health()
     except Exception:
         checks["retriva"] = False

@@ -22,6 +22,7 @@ extraction and chunking to the Retriva backend.
 from __future__ import annotations
 
 import json
+from typing import Protocol
 
 import httpx
 
@@ -46,8 +47,21 @@ _ROUTING_TABLE = {
 }
 
 
-class RetrivaClient:
-    """HTTP client for Retriva ingestion and document management."""
+class RetrivaClient(Protocol):
+    """Protocol for Retriva ingestion and document management clients."""
+    
+    async def ingest(self, fetched: FetchedFile) -> str:
+        ...
+
+    async def delete_document(self, doc_id: str) -> None:
+        ...
+
+    async def health(self) -> bool:
+        ...
+
+
+class RetrivaClientV1:
+    """HTTP client for Retriva ingestion API v1."""
 
     def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
         self._base_url = settings.retriva_ingestion_url
@@ -155,3 +169,76 @@ class RetrivaClient:
             f"endpoint={endpoint_path} job_id={job_id}"
         )
         return doc_id
+
+
+class RetrivaClientV2:
+    """HTTP client for Retriva ingestion API v2."""
+
+    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+        self._base_url = settings.retriva_ingestion_url
+        self._api_key = settings.RETRIVA_API_KEY
+        self._client = client
+
+    def _auth_headers(self) -> dict[str, str]:
+        h: dict[str, str] = {}
+        if self._api_key:
+            h["Authorization"] = f"Bearer {self._api_key}"
+        return h
+
+    async def ingest(self, fetched: FetchedFile) -> str:
+        content_type = (fetched.content_type or "").split(";")[0].strip().lower()
+        url = f"{self._base_url}/api/v2/documents"
+        doc_id = f"owui:{fetched.file_id}"
+
+        files = {
+            "file": (fetched.filename, fetched.content, content_type),
+        }
+        data = {
+            "source_path": doc_id,
+            "page_title": fetched.filename,
+        }
+
+        if fetched.kb_ids:
+            data["kb_ids"] = json.dumps(list(fetched.kb_ids))
+        if fetched.user_metadata:
+            data["user_metadata"] = json.dumps(fetched.metadata_dict())
+
+        response = await self._client.post(
+            url,
+            headers=self._auth_headers(),
+            data=data,
+            files=files,
+        )
+        response.raise_for_status()
+
+        body = response.json()
+        job_id = body.get("job_id", "")
+
+        logger.info(
+            f"retriva_ingested_v2 file_id={fetched.file_id} "
+            f"filename={fetched.filename} doc_id={doc_id} "
+            f"job_id={job_id}"
+        )
+        return doc_id
+
+    async def delete_document(self, doc_id: str) -> None:
+        url = f"{self._base_url}/api/v2/documents/{doc_id}"
+        response = await self._client.delete(url, headers=self._auth_headers())
+        response.raise_for_status()
+
+        logger.info(f"retriva_deleted_v2 doc_id={doc_id}")
+
+    async def health(self) -> bool:
+        url = f"{self._base_url}/healthz"
+        try:
+            response = await self._client.get(url, headers=self._auth_headers())
+            return response.status_code == 200  # noqa: PLR2004
+        except httpx.HTTPError:
+            return False
+
+
+def create_retriva_client(settings: Settings, client: httpx.AsyncClient) -> RetrivaClient:
+    """Factory to create the appropriate RetrivaClient version."""
+    if settings.RETRIVA_INGESTION_API_VERSION.lower() == "v2":
+        return RetrivaClientV2(settings, client)
+    return RetrivaClientV1(settings, client)

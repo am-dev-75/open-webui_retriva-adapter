@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     Optional (with defaults):
         RETRIVA_API_KEY, POLL_INTERVAL_SECONDS, DB_PATH,
-        LOG_LEVEL, ADAPTER_PORT
+        LOG_LEVEL, ADAPTER_PORT, RETRIVA_INGESTION_API_VERSION
     """
 
     model_config = SettingsConfigDict(
@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     RETRIVA_API_KEY: str = Field(
         default="",
         description="Optional Retriva auth token",
+    )
+    RETRIVA_INGESTION_API_VERSION: str = Field(
+        default="v1",
+        description="Retriva API version to use (v1 or v2)",
     )
     POLL_INTERVAL_SECONDS: int = Field(
         default=5,
