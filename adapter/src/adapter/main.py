@@ -305,6 +305,15 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
                 msg["content"] = classification.stripped_content
                 break
 
+    # Inject chat context (KBs and metadata filter) from IngestionContext
+    if _ingestion_ctx:
+        context = _ingestion_ctx.get_ingestion_payload(chat_id)
+        if context.get("kb_ids"):
+            body.setdefault("kb_ids", context["kb_ids"])
+        if context.get("user_metadata"):
+            # Map user_metadata to user_metadata_filter for Retriva core's chat API
+            body.setdefault("user_metadata_filter", context["user_metadata"])
+
     retriva_url = (
         f"{_settings.retriva_chat_url}/v1/chat/completions"  # type: ignore[union-attr]
     )

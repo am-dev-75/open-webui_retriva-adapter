@@ -160,6 +160,43 @@ class TestForwardRouting:
         assert body["id"] == "chatcmpl-retriva-123"
         assert body["choices"][0]["message"]["content"] == "The project is on track."
 
+    @respx.mock
+    async def test_question_propagates_chat_context(self, client: AsyncClient) -> None:
+        """Forwarded question must include kb_ids and user_metadata_filter if active."""
+        retriva_url = f"{_TEST_RETRIVA_CHAT_URL}/v1/chat/completions"
+        
+        # 1. Set up context by sending a directive
+        await client.post(
+            "/v1/chat/completions",
+            json=_chat_body("@@ingestion_tag_start\nproject: Alpha", session_id="context-session"),
+        )
+        
+        # 2. Mock Retriva to capture and verify the body
+        def capture_request(request):
+            import json
+            payload = json.loads(request.content)
+            # Verify the injected filter
+            if payload.get("user_metadata_filter") == {"project": "Alpha"}:
+                return httpx.Response(
+                    200, 
+                    json={
+                        "id": "cmpl-123",
+                        "object": "chat.completion",
+                        "choices": [{"message": {"content": "Metadata received"}, "finish_reason": "stop"}]
+                    }
+                )
+            return httpx.Response(400, json={"error": "Filter missing or wrong"})
+
+        respx.post(retriva_url).mock(side_effect=capture_request)
+
+        # 3. Send a question
+        resp = await client.post(
+            "/v1/chat/completions",
+            json=_chat_body("Tell me about the project.", session_id="context-session"),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["choices"][0]["message"]["content"] == "Metadata received"
+
 
 class TestModelsProxy:
     """GET /v1/models must proxy Retriva's model list."""
