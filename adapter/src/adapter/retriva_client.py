@@ -206,7 +206,7 @@ class RetrivaClientV2:
 
     async def ingest(self, fetched: FetchedFile) -> str:
         content_type = (fetched.content_type or "").split(";")[0].strip().lower()
-        url = f"{self._base_url}/api/v2/documents"
+        url = f"{self._base_url}/api/v2/documents/upload"
         doc_id = f"owui:{fetched.file_id}"
 
         files = {

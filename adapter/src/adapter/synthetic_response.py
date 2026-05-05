@@ -47,7 +47,11 @@ def _format_filenames(filenames: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _build_content(classification: TurnClassification, artifact_result: dict[str, Any] | None = None) -> str:
+def _build_content(
+    classification: TurnClassification, 
+    artifact_result: dict[str, Any] | None = None,
+    base_url: str = ""
+) -> str:
     """Build the human-readable acknowledgement text for the given route."""
     route = classification.route
     directive = classification.directive_result
@@ -90,7 +94,9 @@ def _build_content(classification: TurnClassification, artifact_result: dict[str
                 if artifact_id:
                     # In a real scenario, this URL should be reachable from the user's browser
                     # or redirected by the adapter.
-                    msg += f"\n- **Download**: [Link](/api/v2/artifacts/{artifact_id})"
+                    link_path = f"/api/v2/artifacts/{artifact_id}/content"
+                    full_link = f"{base_url.rstrip('/')}{link_path}" if base_url else link_path
+                    msg += f"\n- **Download**: [Download File]({full_link})"
 
             msg += "\n\nYou will be notified when the file is ready for download."
             return msg
@@ -100,7 +106,11 @@ def _build_content(classification: TurnClassification, artifact_result: dict[str
     return ""
 
 
-def build_response(classification: TurnClassification, artifact_result: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_response(
+    classification: TurnClassification, 
+    artifact_result: dict[str, Any] | None = None,
+    base_url: str = ""
+) -> dict[str, Any]:
     """Build a complete OpenAI-compatible chat.completion response.
 
     Parameters
@@ -115,7 +125,7 @@ def build_response(classification: TurnClassification, artifact_result: dict[str
     dict
         A JSON-serialisable dict matching the OpenAI chat.completion shape.
     """
-    content = _build_content(classification, artifact_result)
+    content = _build_content(classification, artifact_result, base_url=base_url)
     response_id = f"chatcmpl-adapter-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 

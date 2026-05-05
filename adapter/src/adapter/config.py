@@ -93,7 +93,7 @@ class Settings(BaseSettings):
         description="Optional Retriva auth token",
     )
     RETRIVA_INGESTION_API_VERSION: str = Field(
-        default="v1",
+        default="v2",
         description="Retriva API version to use (v1 or v2)",
     )
     POLL_INTERVAL_SECONDS: int = Field(

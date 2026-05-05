@@ -319,7 +319,13 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
                 # so the user gets at least the "started" message or we could fallback to forward.
                 # Actually, if artifact generation fails, we should probably tell the user.
 
-        synthetic = build_response(classification, artifact_result=artifact_result)
+        # Resolve the base URL for the artifact link from the current request
+        base_url = f"{request.url.scheme}://{request.url.netloc}"
+        synthetic = build_response(
+            classification, 
+            artifact_result=artifact_result,
+            base_url=base_url
+        )
         metrics.turns_intercepted_total.labels(route=route).inc()
         return JSONResponse(content=synthetic)
 
@@ -584,6 +590,51 @@ async def receive_owui_event(request: Request) -> dict[str, Any]:
             }
 
     return {"status": "ignored", "event_type": event_type}
+
+
+# ---------------------------------------------------------------------------
+# Artifacts proxy
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v2/artifacts/{artifact_id}/content")
+async def proxy_artifact_download(artifact_id: str) -> StreamingResponse:
+    """Proxy the artifact content download from Retriva Core."""
+    if not _settings or not _http_client:
+        raise HTTPException(status_code=503, detail="Adapter not initialized")
+
+    retriva_url = f"{_settings.retriva_artifacts_url}/artifacts/{artifact_id}/content"
+    
+    try:
+        # We use a streaming response to forward the binary content
+        # without loading it fully into memory.
+        upstream_resp = await _http_client.send(
+            _http_client.build_request("GET", retriva_url, headers=_retriva_headers()),
+            stream=True,
+        )
+        
+        if upstream_resp.status_code != 200:
+            # Handle error (e.g. 202 In Progress, 404 Not Found)
+            content = await upstream_resp.aread()
+            raise HTTPException(status_code=upstream_resp.status_code, detail=content.decode())
+
+        async def _stream_generator():
+            try:
+                async for chunk in upstream_resp.aiter_bytes():
+                    yield chunk
+            finally:
+                await upstream_resp.aclose()
+
+        return StreamingResponse(
+            _stream_generator(),
+            status_code=200,
+            media_type=upstream_resp.headers.get("content-type", "application/octet-stream"),
+            headers={
+                "Content-Disposition": upstream_resp.headers.get("content-disposition", f"attachment; filename={artifact_id}.pdf")
+            }
+        )
+    except httpx.HTTPError as exc:
+        logger.error(f"retriva_artifact_proxy_error id={artifact_id} error={exc}")
+        raise HTTPException(status_code=502, detail=f"Retriva proxy error: {exc}")
 
 
 # ---------------------------------------------------------------------------
