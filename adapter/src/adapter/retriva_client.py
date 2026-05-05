@@ -59,6 +59,15 @@ class RetrivaClient(Protocol):
     async def health(self) -> bool:
         ...
 
+    async def generate_artifact(
+        self,
+        artifact_type: str,
+        format: str,
+        parameters: dict[str, Any] | None = None,
+        user_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        ...
+
 
 class RetrivaClientV1:
     """HTTP client for Retriva ingestion API v1."""
@@ -115,6 +124,16 @@ class RetrivaClientV1:
             return response.status_code == 200  # noqa: PLR2004
         except httpx.HTTPError:
             return False
+
+    async def generate_artifact(
+        self,
+        artifact_type: str,
+        format: str,
+        parameters: dict[str, Any] | None = None,
+        user_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Artifacts are not supported in Retriva API v1."""
+        raise NotImplementedError("Artifact generation requires Retriva API v2.")
 
     # ------------------------------------------------------------------
     # Format-specific routing
@@ -235,6 +254,32 @@ class RetrivaClientV2:
             return response.status_code == 200  # noqa: PLR2004
         except httpx.HTTPError:
             return False
+
+    async def generate_artifact(
+        self,
+        artifact_type: str,
+        format: str,
+        parameters: dict[str, Any] | None = None,
+        user_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Initiate artifact generation via Retriva API v2."""
+        url = f"{self._base_url}/api/v2/artifacts"
+        
+        payload = {
+            "artifact_type": artifact_type,
+            "format": format,
+            "parameters": parameters or {},
+            "user_metadata": user_metadata or {},
+        }
+        
+        response = await self._client.post(
+            url,
+            headers=self._auth_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        
+        return response.json()
 
 
 def create_retriva_client(settings: Settings, client: httpx.AsyncClient) -> RetrivaClient:

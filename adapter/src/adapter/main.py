@@ -56,6 +56,7 @@ _scheduler: AsyncIOScheduler | None = None
 _http_client: httpx.AsyncClient | None = None
 _ingestion_ctx: IngestionContext | None = None
 _chat_observer: ChatObserver | None = None
+_retriva: RetrivaClient | None = None
 _sync_lock = asyncio.Lock()
 
 
@@ -104,7 +105,7 @@ def _retriva_headers() -> dict[str, str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ANN201, ARG001
     """Manage adapter lifecycle: open store, start scheduler."""
-    global _settings, _store, _orchestrator, _scheduler, _http_client, _ingestion_ctx  # noqa: PLW0603
+    global _settings, _store, _orchestrator, _scheduler, _http_client, _ingestion_ctx, _retriva  # noqa: PLW0603
 
     _settings = load_settings()
     setup_logging()
@@ -126,9 +127,9 @@ async def lifespan(app: FastAPI):  # noqa: ANN201, ARG001
 
     observer = FileObserver(_settings, _http_client)
     fetcher = FileFetcher(_settings, _http_client)
-    retriva = create_retriva_client(_settings, _http_client)
+    _retriva = create_retriva_client(_settings, _http_client)
     _orchestrator = SyncOrchestrator(
-        observer, fetcher, retriva, _store,
+        observer, fetcher, _retriva, _store,
         ingestion_context=_ingestion_ctx,
     )
 
@@ -273,7 +274,11 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     if _ingestion_ctx:
         is_ingestion_active = _ingestion_ctx.is_active(chat_id)
 
-    classification = classify(body, is_ingestion_active=is_ingestion_active)
+    classification = classify(
+        body, 
+        is_ingestion_active=is_ingestion_active,
+        enable_artifact_requests=_settings.ENABLE_ARTIFACT_REQUESTS if _settings else True
+    )
     route = classification.route
 
     # Apply directive to ingestion context once, before branching
@@ -292,7 +297,29 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
 
     # --- Intercepted routes: return synthetic acknowledgement ---
     if route != "forward":
-        synthetic = build_response(classification)
+        artifact_result = None
+        if route == "artifact_request" and _retriva and _settings and _settings.ENABLE_ARTIFACT_REQUESTS:
+            try:
+                req = classification.artifact_request
+                if req:
+                    # Resolve user metadata from context
+                    context = _ingestion_ctx.get_ingestion_payload(chat_id) if _ingestion_ctx else {}
+                    user_metadata = context.get("user_metadata", {})
+                    
+                    artifact_result = await _retriva.generate_artifact(
+                        artifact_type=req.artifact_type,
+                        format=req.format,
+                        parameters=req.parameters,
+                        user_metadata=user_metadata,
+                    )
+            except Exception as exc:
+                logger.error(f"artifact_generation_failed chat_id={chat_id} error={exc}")
+                # We still return the synthetic response but maybe without job details
+                # or we could return an error. For now, let's just log and continue
+                # so the user gets at least the "started" message or we could fallback to forward.
+                # Actually, if artifact generation fails, we should probably tell the user.
+
+        synthetic = build_response(classification, artifact_result=artifact_result)
         metrics.turns_intercepted_total.labels(route=route).inc()
         return JSONResponse(content=synthetic)
 

@@ -138,6 +138,25 @@ class Settings(BaseSettings):
         description="Seconds between chat message polling cycles (fallback)",
     )
 
+    # --- Artifacts -----------------------------------------------------------
+    ENABLE_ARTIFACT_REQUESTS: bool = Field(
+        default=True,
+        description="Enable detection and routing of artifact generation requests",
+    )
+    ARTIFACT_DEFAULT_FORMAT: str = Field(
+        default="pdf",
+        description="Default format for generated artifacts",
+    )
+    ARTIFACT_REQUEST_TIMEOUT_SECONDS: int = Field(
+        default=10,
+        ge=1,
+        description="Timeout for artifact generation requests",
+    )
+    RETRIVA_ARTIFACTS_API_BASE_URL: str = Field(
+        default="",
+        description="Optional override for the Retriva artifacts API v2 base URL",
+    )
+
     # --- Retry tuning --------------------------------------------------------
     MAX_RETRIES: int = Field(default=3, ge=0)
     BACKOFF_BASE_SECONDS: float = Field(default=1.0, gt=0)
@@ -161,6 +180,13 @@ class Settings(BaseSettings):
             f"{self.RETRIVA_API_PROTOCOL}://"
             f"{self.RETRIVA_CHAT_API_HOST}:{self.RETRIVA_CHAT_PORT}"
         )
+
+    @property
+    def retriva_artifacts_url(self) -> str:
+        """Full base URL for the Retriva artifacts API v2."""
+        if self.RETRIVA_ARTIFACTS_API_BASE_URL:
+            return self.RETRIVA_ARTIFACTS_API_BASE_URL.rstrip("/")
+        return f"{self.retriva_ingestion_url}/api/v2"
 
 
 def load_settings(**overrides: object) -> Settings:

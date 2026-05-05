@@ -28,6 +28,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from adapter.artifact_classifier import ArtifactRequest, classify_artifact_request
 from adapter.directive_parser import DirectiveResult, parse_directive
 from adapter.logger import get_logger
 
@@ -38,6 +39,7 @@ Route = Literal[
     "directive_stop_ack",
     "upload_ack",
     "directive_plus_upload_ack",
+    "artifact_request",
     "forward",
 ]
 
@@ -50,6 +52,7 @@ class TurnClassification:
     has_substantive_question: bool
     directive_result: DirectiveResult | None
     stripped_content: str
+    artifact_request: ArtifactRequest | None = None
     route: Route = "forward"
 
 
@@ -185,7 +188,11 @@ def _get_current_turn_messages(messages: list[dict[str, Any]]) -> list[dict[str,
     return messages[last_assistant_idx + 1:]
 
 
-def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) -> TurnClassification:
+def classify(
+    request_body: dict[str, Any], 
+    is_ingestion_active: bool = False,
+    enable_artifact_requests: bool = True,
+) -> TurnClassification:
     """Classify a chat completion request into a routing decision.
 
     Parameters
@@ -194,6 +201,8 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
         The full OpenAI-compatible chat completion request JSON body.
     is_ingestion_active:
         Whether the ingestion tagging context is currently active for this chat.
+    enable_artifact_requests:
+        Whether to detect artifact generation requests.
 
     Returns
     -------
@@ -207,6 +216,13 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
     all_user_content = _extract_all_user_content(current_turn_messages)
     has_owui_markers = _has_owui_markers(current_turn_messages)
     
+    # 0. Detect Artifact Requests (highest priority for human text)
+    artifact_request: ArtifactRequest | None = None
+    human_content = "\n".join(user_texts)
+    if enable_artifact_requests and human_content and not has_owui_markers:
+        # Only classify as artifact request if it's purely human text without OWUI markers
+        # and we are not in a synthetic/control turn.
+        artifact_request = classify_artifact_request(human_content)
     # 1. Parse directives from all user content (more robust than just human-authored)
     directive_result = parse_directive(all_user_content)
     has_directive = directive_result.action != "none"
@@ -275,7 +291,9 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
 
     # 4. Apply routing table
     route: Route
-    if has_substantive_question:
+    if artifact_request:
+        route = "artifact_request"
+    elif has_substantive_question:
         route = "forward"
     elif is_upload_only:
         if has_directive:
@@ -304,5 +322,6 @@ def classify(request_body: dict[str, Any], is_ingestion_active: bool = False) ->
         has_substantive_question=has_substantive_question,
         directive_result=directive_result,
         stripped_content=stripped,
+        artifact_request=artifact_request,
         route=route,
     )

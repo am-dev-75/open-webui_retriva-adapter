@@ -47,7 +47,7 @@ def _format_filenames(filenames: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _build_content(classification: TurnClassification) -> str:
+def _build_content(classification: TurnClassification, artifact_result: dict[str, Any] | None = None) -> str:
     """Build the human-readable acknowledgement text for the given route."""
     route = classification.route
     directive = classification.directive_result
@@ -70,24 +70,52 @@ def _build_content(classification: TurnClassification) -> str:
             meta_block = f"\n\n**Active metadata:**\n{_format_metadata(directive.metadata)}"
         return f"✅ Document received and queued for ingestion.{meta_block}"
 
+    if route == "artifact_request":
+        req = classification.artifact_request
+        if req:
+            msg = f"🛠️ **Artifact generation started**\n- **Type**: {req.artifact_type}\n- **Format**: {req.format}"
+            if artifact_result:
+                job_id = artifact_result.get("job_id")
+                artifact_id = artifact_result.get("artifact_id")
+                status = artifact_result.get("status", "accepted")
+                
+                if job_id:
+                    msg += f"\n- **Job ID**: `{job_id}`"
+                if artifact_id:
+                    msg += f"\n- **Artifact ID**: `{artifact_id}`"
+                if status:
+                    msg += f"\n- **Status**: {status}"
+                
+                # Construct download URL (simulated/inferred from Core API)
+                if artifact_id:
+                    # In a real scenario, this URL should be reachable from the user's browser
+                    # or redirected by the adapter.
+                    msg += f"\n- **Download**: [Link](/api/v2/artifacts/{artifact_id})"
+
+            msg += "\n\nYou will be notified when the file is ready for download."
+            return msg
+        return "🛠️ Artifact generation started."
+
     # Should not be called for "forward" route, but handle gracefully
     return ""
 
 
-def build_response(classification: TurnClassification) -> dict[str, Any]:
+def build_response(classification: TurnClassification, artifact_result: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build a complete OpenAI-compatible chat.completion response.
 
     Parameters
     ----------
     classification:
         The turn classification result (must have a non-``forward`` route).
+    artifact_result:
+        Optional result from the artifact generation API.
 
     Returns
     -------
     dict
         A JSON-serialisable dict matching the OpenAI chat.completion shape.
     """
-    content = _build_content(classification)
+    content = _build_content(classification, artifact_result)
     response_id = f"chatcmpl-adapter-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
 
