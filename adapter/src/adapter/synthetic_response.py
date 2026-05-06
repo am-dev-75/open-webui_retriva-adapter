@@ -21,6 +21,7 @@ feedback without a round-trip to the chat LLM.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from typing import Any
@@ -47,7 +48,7 @@ def _format_filenames(filenames: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _build_content(
+def build_content(
     classification: TurnClassification, 
     artifact_result: dict[str, Any] | None = None,
     base_url: str = ""
@@ -77,7 +78,9 @@ def _build_content(
     if route == "artifact_request":
         req = classification.artifact_request
         if req:
+            # Base message with generation details
             msg = f"🛠️ **Artifact generation started**\n- **Type**: {req.artifact_type}\n- **Format**: {req.format}"
+            
             if artifact_result:
                 job_id = artifact_result.get("job_id")
                 artifact_id = artifact_result.get("artifact_id")
@@ -90,15 +93,19 @@ def _build_content(
                 if status:
                     msg += f"\n- **Status**: {status}"
                 
-                # Construct download URL (simulated/inferred from Core API)
-                if artifact_id:
-                    # In a real scenario, this URL should be reachable from the user's browser
-                    # or redirected by the adapter.
+                # We only show the link if status is 'completed' (for non-streaming)
+                # or if it's explicitly ready.
+                is_ready = artifact_result.get("is_ready", False)
+                if artifact_id and (status == "completed" or is_ready):
                     link_path = f"/api/v2/artifacts/{artifact_id}/content"
                     full_link = f"{base_url.rstrip('/')}{link_path}" if base_url else link_path
-                    msg += f"\n- **Download**: [Download File]({full_link})"
+                    msg += f"\n\n✅ **Ready!**\n- **Download**: [Download File]({full_link})"
+                elif status == "failed":
+                    error = artifact_result.get("error", "Unknown error")
+                    msg += f"\n\n❌ **Generation failed**\n- **Error**: {error}"
+                else:
+                    msg += "\n\n⏳ *Processing... your file will be available shortly.*"
 
-            msg += "\n\nYou will be notified when the file is ready for download."
             return msg
         return "🛠️ Artifact generation started."
 
@@ -153,3 +160,26 @@ def build_response(
 
     logger.info(f"synthetic_response_built route={classification.route} id={response_id}")
     return response
+
+
+def format_streaming_chunk(
+    content: str, 
+    response_id: str, 
+    created: int, 
+    finish_reason: str | None = None
+) -> str:
+    """Format a content chunk as an OpenAI SSE data line."""
+    chunk = {
+        "id": response_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": "retriva-adapter",
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": content} if content else {},
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    return f"data: {json.dumps(chunk)}\n\n"

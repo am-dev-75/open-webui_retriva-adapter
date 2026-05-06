@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import re
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -41,7 +43,7 @@ from adapter.observer import FileObserver
 from adapter.chat_observer import ChatObserver
 from adapter.orchestrator import SyncOrchestrator
 from adapter.retriva_client import create_retriva_client
-from adapter.synthetic_response import build_response
+from adapter.synthetic_response import build_response, build_content, format_streaming_chunk
 from adapter.turn_classifier import classify
 
 logger = get_logger(__name__)
@@ -267,6 +269,7 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
     body: dict[str, Any] = await request.json()
 
     logger.debug(f"### Chat request received. body={body}")
+    is_streaming = body.get("stream", False)
 
     # Classify the turn
     chat_id = body.get("chat_id", body.get("session_id", "default"))
@@ -321,6 +324,61 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
 
         # Resolve the base URL for the artifact link from the current request
         base_url = f"{request.url.scheme}://{request.url.netloc}"
+
+        if is_streaming:
+            response_id = f"chatcmpl-adapter-{uuid.uuid4().hex[:12]}"
+            created = int(time.time())
+
+            async def _artifact_stream():
+                try:
+                    # 1. Yield initial acknowledgement
+                    initial_content = build_content(classification, artifact_result, base_url=base_url)
+                    yield format_streaming_chunk(initial_content, response_id, created)
+
+                    # 2. Poll if we have an artifact ID and it's not ready yet
+                    artifact_id = (artifact_result or {}).get("artifact_id")
+                    if artifact_id and (artifact_result or {}).get("status") != "completed":
+                        max_polls = 45 # up to 45 seconds
+                        for _ in range(max_polls):
+                            await asyncio.sleep(1.0)
+                            try:
+                                status_resp = await _retriva.get_artifact_status(artifact_id)
+                                status = status_resp.get("status")
+                                if status == "completed":
+                                    link_path = f"/api/v2/artifacts/{artifact_id}/content"
+                                    full_link = f"{base_url.rstrip('/')}{link_path}"
+                                    ready_msg = f"\n\n✅ **Ready!**\n- **Download**: [Download File]({full_link})"
+                                    yield format_streaming_chunk(ready_msg, response_id, created)
+                                    break
+                                elif status == "failed":
+                                    error = status_resp.get("error", "Unknown error")
+                                    yield format_streaming_chunk(f"\n\n❌ **Generation failed**: {error}", response_id, created)
+                                    break
+                            except Exception as exc:
+                                logger.error(f"poll_artifact_failed id={artifact_id} error={exc}")
+                except Exception as exc:
+                    logger.error(f"artifact_stream_error error={exc}")
+                    yield format_streaming_chunk(f"\n\n❌ **Adapter error**: {exc}", response_id, created)
+                
+                # Signal end of stream
+                yield format_streaming_chunk("", response_id, created, finish_reason="stop")
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(_artifact_stream(), media_type="text/event-stream")
+
+        # For non-streaming, we can wait a few seconds to see if it finishes fast
+        artifact_id = (artifact_result or {}).get("artifact_id")
+        if artifact_id and (artifact_result or {}).get("status") != "completed":
+            for _ in range(5):
+                await asyncio.sleep(1.0)
+                try:
+                    status_resp = await _retriva.get_artifact_status(artifact_id)
+                    if status_resp.get("status") == "completed":
+                        artifact_result = {**artifact_result, **status_resp, "is_ready": True}
+                        break
+                except:
+                    break
+
         synthetic = build_response(
             classification, 
             artifact_result=artifact_result,
