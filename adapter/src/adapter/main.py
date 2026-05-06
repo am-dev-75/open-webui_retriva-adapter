@@ -615,7 +615,14 @@ async def proxy_artifact_download(artifact_id: str) -> StreamingResponse:
         if upstream_resp.status_code != 200:
             # Handle error (e.g. 202 In Progress, 404 Not Found)
             content = await upstream_resp.aread()
-            raise HTTPException(status_code=upstream_resp.status_code, detail=content.decode())
+            try:
+                # Try to parse as JSON to avoid double-nesting if it's already a detail dict
+                error_data = upstream_resp.json()
+                if isinstance(error_data, dict) and "detail" in error_data:
+                    raise HTTPException(status_code=upstream_resp.status_code, detail=error_data["detail"])
+                raise HTTPException(status_code=upstream_resp.status_code, detail=error_data)
+            except Exception:
+                raise HTTPException(status_code=upstream_resp.status_code, detail=content.decode())
 
         async def _stream_generator():
             try:

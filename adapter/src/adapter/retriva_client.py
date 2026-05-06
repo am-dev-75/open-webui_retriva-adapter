@@ -245,6 +245,13 @@ class RetrivaClientV2:
         response = await self._client.delete(url, headers=self._auth_headers())
         response.raise_for_status()
 
+    async def get_artifact_status(self, artifact_id: str) -> dict[str, Any]:
+        """Poll the status of an artifact generation job."""
+        url = f"{self._base_url}/api/v2/artifacts/{artifact_id}"
+        response = await self._client.get(url, headers=self._auth_headers())
+        response.raise_for_status()
+        return response.json()
+
         logger.info(f"retriva_deleted_v2 doc_id={doc_id}")
 
     async def health(self) -> bool:

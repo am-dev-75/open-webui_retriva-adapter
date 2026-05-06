@@ -34,7 +34,7 @@ class ArtifactRequest:
 
 
 _CREATION_VERBS = {
-    "create", "generate", "export", "make", "produce", "list", "report", "download"
+    "create", "generate", "export", "make", "produce", "download"
 }
 
 _FORMAT_MAP = {
@@ -52,9 +52,7 @@ _FORMAT_MAP = {
 }
 
 _TYPE_MAP = {
-    "list": "document_list",
     "document list": "document_list",
-    "report": "basic_report",
     "basic report": "basic_report",
 }
 
@@ -69,30 +67,34 @@ def classify_artifact_request(text: str, default_format: str = "pdf") -> Artifac
 
     clean_text = text.lower().strip()
     
-    # Avoid questions unless they have explicit creation intent
-    is_question = "?" in text or clean_text.startswith(("what", "how", "why", "who", "when", "where", "can", "could"))
-
     # 1. Check for creation intent (verb)
     words = re.findall(r'[a-z0-9]+', clean_text)
     if not words:
         return None
         
-    has_verb = any(verb in words[:5] for verb in _CREATION_VERBS)
+    # Creation verbs are strong signals
+    has_creation_verb = any(verb in words[:5] for verb in _CREATION_VERBS)
     
-    if is_question and not has_verb:
+    # Formats are also strong signals
+    mentioned_format = next((word for word in words if word in _FORMAT_MAP), None)
+    
+    # Requirement: Must have either a creation verb OR a file format mention
+    if not has_creation_verb and not mentioned_format:
         return None
 
-    if not has_verb:
-        # Check for direct format mentions like "pdf of my docs"
-        if not any(fmt in words for fmt in _FORMAT_MAP):
+    # Avoid questions unless they have strong creation intent
+    # "What is a PDF?" -> False
+    # "Can you make a PDF?" -> True
+    # "Give me a PDF" -> True
+    is_question = "?" in text or clean_text.startswith(("what", "how", "why", "who", "when", "where", "can", "could"))
+    if is_question and not has_creation_verb:
+        # Check for other action words if it's a question mentioning a format
+        action_words = {"give", "send", "provide", "make", "get", "save", "show", "list"}
+        if not any(word in words for word in action_words):
             return None
 
     # 2. Extract format
-    detected_format = default_format
-    for word in words:
-        if word in _FORMAT_MAP:
-            detected_format = _FORMAT_MAP[word]
-            break
+    detected_format = _FORMAT_MAP.get(mentioned_format) if mentioned_format else default_format
 
     # 3. Extract type
     detected_type = "document_list"  # Default type
@@ -101,24 +103,34 @@ def classify_artifact_request(text: str, default_format: str = "pdf") -> Artifac
             detected_type = artifact_type
             break
             
-    # Special case: "list of documents" -> document_list
-    if "list" in words and "document" in words:
-        detected_type = "document_list"
-    elif "report" in words:
+    # Heuristics for type
+    if "report" in words:
         detected_type = "basic_report"
+    elif "list" in words:
+        detected_type = "document_list"
 
-    # 4. Final validation: must have some "artifact-y" keywords to avoid false positives
+    # 4. Extract query (crude but effective)
+    # We take the whole text and strip common leading/trailing patterns
+    query = text
+    # Strip common leading patterns
+    query = re.sub(r'(?i)^(generate|create|make|export|download|list|show)\s+(a|an)?\s+(\w+\s+)?(file|artifact|report|list)?\s+(of|about|dealing with|listing|regarding)?\s+', '', query)
+    # Strip common trailing patterns
+    query = re.sub(r'(?i)\s+in\s+\w+\s+format$', '', query)
+    query = re.sub(r'(?i)\s+as\s+(a|an)?\s+\w+$', '', query)
+    query = query.strip()
+
+    # Final validation: must have some "artifact-y" keywords to avoid false positives
     artifact_keywords = {
-        "pdf", "markdown", "report", "list", "document", "file", "export",
-        "excel", "spreadsheet", "word", "docx", "xlsx", "csv"
+        "pdf", "markdown", "report", "document", "file", "export",
+        "excel", "spreadsheet", "word", "docx", "xlsx", "csv", "odt", "ods", "odp"
     }
     if not any(kw in words for kw in artifact_keywords):
         return None
 
-    logger.info(f"artifact_request_detected type={detected_type} format={detected_format}")
+    logger.info(f"artifact_request_detected type={detected_type} format={detected_format} query='{query}'")
     
     return ArtifactRequest(
         artifact_type=detected_type,
         format=detected_format,
-        parameters={},
+        parameters={"query": query},
     )
